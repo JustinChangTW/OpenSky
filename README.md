@@ -113,6 +113,8 @@ npm run start:service
 - 原始碼：`apps/web/src`
 - 建置輸出：`apps/web/dist`
 - 部署目標：GitHub Pages
+- GitHub Pages workflow：`.github/workflows/pages.yml`
+- 需要在 GitHub repository variables 設定 `OPEN_SKY_API_BASE` 指向 Render backend，例如 `https://your-service.onrender.com`
 
 ### Backend
 
@@ -125,6 +127,7 @@ npm run start:service
 - 設定 `OPEN_SKY_ENV=production`
 - 將 `OPEN_SKY_PERSIST_PATH` 指到可持久化磁碟路徑
 - 將 `OPEN_SKY_OWNER_USERNAME` / `OPEN_SKY_OWNER_PASSWORD` 改為非 demo 值
+- 在 GitHub repo 的 `Settings > Secrets and variables > Actions > Variables` 建立 `OPEN_SKY_API_BASE`
 
 ## 常用指令
 

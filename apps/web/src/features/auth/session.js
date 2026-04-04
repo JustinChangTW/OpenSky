@@ -1,5 +1,17 @@
 const SESSION_STORAGE_KEY = "opensky.session-token";
-const API_BASE = globalThis.OPEN_SKY_API_BASE ?? "";
+
+function normalizeApiBase(value) {
+  return String(value ?? "").trim().replace(/\/$/, "");
+}
+
+function resolveApiBase() {
+  return normalizeApiBase(
+    globalThis.OPEN_SKY_CONFIG?.apiBase
+    ?? globalThis.OPEN_SKY_API_BASE
+    ?? globalThis.document?.querySelector?.('meta[name="opensky-api-base"]')?.content
+    ?? ""
+  );
+}
 
 export function loadSessionToken(storageRef = globalThis.localStorage) {
   try {
@@ -23,7 +35,7 @@ export function saveSessionToken(token, storageRef = globalThis.localStorage) {
 
 export async function requestJson(pathname, init = {}) {
   const token = loadSessionToken();
-  const response = await fetch(`${API_BASE}${pathname}`, {
+  const response = await fetch(`${resolveApiBase()}${pathname}`, {
     headers: {
       "content-type": "application/json",
       "x-opensky-session": token,
