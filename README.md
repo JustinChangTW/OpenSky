@@ -13,15 +13,20 @@ This workspace is organized as a greenfield monorepo:
 
 ## Current implementation status
 
-The repository now includes the foundational Wave 0 bootstrap:
+The repository now includes the MVP baseline:
 
 - canonical product spec under `docs/specs/opensky-codex-spec-final.md`
-- shared contracts and error envelope
+- shared contracts and structured error envelope
 - allowlist matcher package
-- in-memory persistence store
-- static frontend skeleton
-- backend service skeleton
+- static frontend shell with maximized-first workspace controls
+- backend service routes for auth, sites, projects, tabs, bookmarks, notes, browse, session vault, file transfer, audit, and layout preferences
+- optional file-backed persistence via `OPEN_SKY_PERSIST_PATH`
 - root validation scripts with zero external dependencies
+
+## Demo credentials
+
+- Username: `owner-admin`
+- Password: `opensky-demo`
 
 ## Commands
 
@@ -36,5 +41,7 @@ npm run start:service
 ## Notes
 
 - This repo currently avoids external npm dependencies so the workspace remains runnable in a restricted environment.
-- The backend uses in-memory persistence as the initial implementation baseline.
+- The backend defaults to in-memory persistence, but can persist workspace data to a JSON file by setting `OPEN_SKY_PERSIST_PATH`.
+- Auth session tokens are not persisted across backend restart; the owner-admin user must sign in again.
+- In `OPEN_SKY_ENV=production`, the service now refuses to boot with demo credentials or memory-only persistence.
 - Unsupported site behavior must always be surfaced explicitly; no silent fallbacks are allowed.

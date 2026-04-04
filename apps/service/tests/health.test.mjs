@@ -10,4 +10,10 @@ test("service health endpoint responds with bootstrap status", async () => {
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
   assert.equal(payload.service, "opensky");
+  assert.equal(payload.mode, "ready");
+  assert.equal(payload.environment, "development");
+  assert.equal(payload.persistenceMode, "memory");
+  assert.equal(payload.persistPathConfigured, false);
+  assert.deepEqual(payload.startupWarnings, ["demo_credentials", "ephemeral_persistence"]);
+  assert.equal(typeof payload.startedAt, "string");
 });

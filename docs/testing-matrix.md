@@ -7,6 +7,18 @@
 - `npm run test`
 - `npm run build`
 
+## Current automated coverage
+
+- service health and auth/session flow
+- service unavailable / warmup handling
+- allowlist matcher and blocked redirect handling
+- sites, projects, tabs, bookmarks, notes, layout preferences
+- browse open/navigate/close
+- restart restoration for projects, tabs, and layout preferences when file-backed persistence is enabled
+- session vault revoke and expiry handling
+- file transfer preview-before-approve
+- fullscreen fallback and layout state transitions
+
 ## Priority coverage
 
 - auth protection
