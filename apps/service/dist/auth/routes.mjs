@@ -14,15 +14,15 @@ export function registerAuthRoutes(router) {
       ...createOwnerSession(),
       token: crypto.randomUUID()
     };
-    context.store.state.auth.session = session;
-    writeAudit(context, { actorId: session.actorId, action: "auth.sign-in", targetType: "session", targetId: session.token, result: "success" });
+    await context.store.setSession(session);
+    await writeAudit(context, { actorId: session.actorId, action: "auth.sign-in", targetType: "session", targetId: session.token, result: "success" });
     return jsonResponse(session, { status: 201 });
   }, { authRequired: false }));
 
   router.add("POST", "/v1/auth/sign-out", withRoute(async ({ context, actor }) => {
     const token = actor.token;
-    context.store.state.auth.session = null;
-    writeAudit(context, { actorId: actor.actorId, action: "auth.sign-out", targetType: "session", targetId: token, result: "success" });
+    await context.store.clearSession();
+    await writeAudit(context, { actorId: actor.actorId, action: "auth.sign-out", targetType: "session", targetId: token, result: "success" });
     return jsonResponse({ signedOut: true });
   }));
 

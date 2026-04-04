@@ -140,6 +140,7 @@ npm run start:service
 
 - 目前 repo 刻意避免外部 npm dependencies，讓 workspace 在受限環境下也能執行。
 - backend 預設使用 in-memory persistence；若要讓 workspace/domain state 在服務重啟後保留，可設定 `OPEN_SKY_PERSIST_PATH` 寫入 JSON 檔。
+- 若提供 `OPEN_SKY_FIREBASE_PROJECT_ID`、`OPEN_SKY_FIREBASE_CLIENT_EMAIL`、`OPEN_SKY_FIREBASE_PRIVATE_KEY`，backend 會改走 Firestore 作為 durable store；Render 仍保留 auth/session、allowlist 與 runtime 行為的執行責任。
 - auth session token 不會在 backend 重啟後保留；owner-admin 需要重新登入。
 - 當 `OPEN_SKY_ENV=production` 時，service 不允許使用 demo credentials，也不允許 memory-only persistence。
 - 外部網站若有不支援的行為，必須明確對使用者顯示；不能 silent failure。

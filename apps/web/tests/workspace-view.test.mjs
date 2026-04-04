@@ -33,5 +33,10 @@ test("workspace shell accepts app workspace state shape", () => {
   assert.match(markup, /Open selected site/);
   assert.match(markup, /token/);
   assert.match(markup, /site\.open/);
+  assert.match(markup, /Controlled navigation/);
+  assert.match(markup, /Navigate active tab/);
+  assert.match(markup, /Top bar/);
+  assert.match(markup, /Bottom bar/);
+  assert.doesNotMatch(markup, /Open URL/);
   assert.doesNotMatch(markup, /undefined/);
 });

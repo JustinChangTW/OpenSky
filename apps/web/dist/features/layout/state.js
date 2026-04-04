@@ -12,6 +12,38 @@ export function createDefaultLayoutState() {
 
 export const createInitialLayoutState = createDefaultLayoutState;
 
+const LAYOUT_KEYS = [
+  "leftPanelState",
+  "rightPanelState",
+  "topBarState",
+  "bottomBarState",
+  "viewMode",
+  "focusMode",
+  "contentZoomRatio"
+];
+
+const BAR_STATE_CYCLES = {
+  topBarState: ["expanded", "compact", "autoHide", "hidden"],
+  bottomBarState: ["expanded", "collapsed", "autoHide", "hidden"]
+};
+
+export function pickLayoutState(source = {}) {
+  const layout = createDefaultLayoutState();
+  for (const key of LAYOUT_KEYS) {
+    if (Object.hasOwn(source, key) && source[key] !== undefined) {
+      layout[key] = source[key];
+    }
+  }
+  return layout;
+}
+
+export function mergeLayoutState(currentLayout, source = {}) {
+  return {
+    ...currentLayout,
+    ...pickLayoutState(source)
+  };
+}
+
 export function reduceLayoutState(state, action) {
   switch (action.type) {
     case "set-view-mode":
@@ -79,6 +111,22 @@ export function toggleSidePanel(state, panelKey) {
 
 export function toggleFocusMode(state) {
   return reduceLayoutState(state, { type: "toggle-focus" });
+}
+
+export function toggleBarState(state, panelKey) {
+  const cycle = BAR_STATE_CYCLES[panelKey];
+  if (!cycle) {
+    return state;
+  }
+
+  const currentValue = state[panelKey];
+  const currentIndex = cycle.indexOf(currentValue);
+  const nextValue = cycle[(currentIndex + 1) % cycle.length];
+  return reduceLayoutState(state, {
+    type: "set-panel",
+    panel: panelKey,
+    value: nextValue
+  });
 }
 
 export function toLayoutPreferencePayload(layout, projectId = null) {

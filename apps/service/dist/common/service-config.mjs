@@ -22,8 +22,19 @@ export function createServiceConfig(env = process.env) {
   const ownerPassword = String(env.OPEN_SKY_OWNER_PASSWORD ?? DEFAULT_OWNER_PASSWORD);
   const rawPersistPath = String(env.OPEN_SKY_PERSIST_PATH ?? "").trim();
   const persistPath = rawPersistPath ? path.resolve(rawPersistPath) : "";
-  const persistenceMode = persistPath ? "file" : "memory";
+  const firebaseProjectId = String(env.OPEN_SKY_FIREBASE_PROJECT_ID ?? "").trim();
+  const firebaseClientEmail = String(env.OPEN_SKY_FIREBASE_CLIENT_EMAIL ?? "").trim();
+  const firebasePrivateKey = String(env.OPEN_SKY_FIREBASE_PRIVATE_KEY ?? "");
+  const firebaseDatabaseId = String(env.OPEN_SKY_FIREBASE_DATABASE_ID ?? "(default)").trim();
+  const firebaseTokenUri = String(env.OPEN_SKY_FIREBASE_TOKEN_URI ?? "https://oauth2.googleapis.com/token").trim();
+  const firebaseConfigured = Boolean(firebaseProjectId && firebaseClientEmail && firebasePrivateKey);
+  const firebasePartiallyConfigured = !firebaseConfigured && Boolean(firebaseProjectId || firebaseClientEmail || firebasePrivateKey);
+  const persistenceMode = firebaseConfigured ? "firestore" : persistPath ? "file" : "memory";
   const startupWarnings = [];
+
+  if (firebasePartiallyConfigured) {
+    throw new Error("OPEN_SKY_FIREBASE_PROJECT_ID, OPEN_SKY_FIREBASE_CLIENT_EMAIL, and OPEN_SKY_FIREBASE_PRIVATE_KEY must be configured together.");
+  }
 
   if (isDemoCredentialPair(ownerUsername, ownerPassword)) {
     startupWarnings.push("demo_credentials");
@@ -38,8 +49,8 @@ export function createServiceConfig(env = process.env) {
       throw new Error("OPEN_SKY_OWNER_USERNAME and OPEN_SKY_OWNER_PASSWORD must be set to non-demo values in production.");
     }
 
-    if (persistenceMode !== "file") {
-      throw new Error("OPEN_SKY_PERSIST_PATH must be configured in production so workspace data survives restart.");
+    if (persistenceMode === "memory") {
+      throw new Error("Configure OPEN_SKY_FIREBASE_* or OPEN_SKY_PERSIST_PATH in production so workspace data survives restart.");
     }
   }
 
@@ -49,7 +60,15 @@ export function createServiceConfig(env = process.env) {
     ownerPassword,
     persistPath,
     persistenceMode,
-    startupWarnings
+    startupWarnings,
+    firebase: {
+      configured: firebaseConfigured,
+      projectId: firebaseProjectId,
+      clientEmail: firebaseClientEmail,
+      privateKey: firebasePrivateKey,
+      databaseId: firebaseDatabaseId,
+      tokenUri: firebaseTokenUri
+    }
   };
 }
 
@@ -59,6 +78,7 @@ export function createRuntimeDiagnostics(config, startedAt = toIsoTimestamp()) {
     environment: config.environment,
     persistenceMode: config.persistenceMode,
     persistPathConfigured: config.persistenceMode === "file",
+    firebaseConfigured: config.persistenceMode === "firestore",
     startupWarnings: [...config.startupWarnings]
   };
 }

@@ -110,6 +110,11 @@ test("file-backed persistence restores projects, tabs, and layout preferences ac
 
   const secondClient = createTestClient({ persistPath });
 
+  const meBeforeSignInResponse = await secondClient.request("/v1/me");
+  const meBeforeSignInPayload = await meBeforeSignInResponse.json();
+  assert.equal(meBeforeSignInResponse.status, 401);
+  assert.equal(meBeforeSignInPayload.code, "AUTH_REQUIRED");
+
   const unauthorizedResponse = await secondClient.request("/v1/projects");
   const unauthorizedPayload = await unauthorizedResponse.json();
   assert.equal(unauthorizedResponse.status, 401);

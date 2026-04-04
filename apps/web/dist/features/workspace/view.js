@@ -206,6 +206,7 @@ function createContentStage(layout, data) {
           <button type="button" class="ghost-button" data-action="set-view-mode" data-view-mode="maximized">Maximized</button>
           <button type="button" class="ghost-button" data-action="enter-fullscreen">Fullscreen</button>
           <button type="button" class="ghost-button" data-action="toggle-focus">Focus</button>
+          <button type="button" class="ghost-button" data-action="toggle-top-bar">Top bar</button>
           <button type="button" class="ghost-button" data-action="sign-out">Sign out</button>
         </div>
       </header>
@@ -223,13 +224,16 @@ function createContentStage(layout, data) {
       </section>
       ${renderTabs(data)}
       <section class="workspace-urlbar">
+        <div class="workspace-urlbar__header">
+          <p class="eyebrow">Controlled navigation</p>
+          <p class="workspace-urlbar__note">Open a site from the allowlisted site list first. Use this field to navigate the active tab only.</p>
+        </div>
         <label class="workspace-urlbar__field">
-          <span class="workspace-urlbar__label">Allowlisted URL</span>
-          <input data-url-input type="url" value="${escapeHtml(urlValue)}" placeholder="https://allowlisted.example/path" />
+          <span class="workspace-urlbar__label">Active tab URL</span>
+          <input data-url-input type="url" value="${escapeHtml(urlValue)}" placeholder="https://allowlisted.example/path" ${activeTab ? "" : "disabled"} />
         </label>
         <div class="stack-actions">
-          <button type="button" class="primary-button" data-action="browse-open">Open URL</button>
-          <button type="button" class="ghost-button" data-action="browse-navigate" ${activeTab ? "" : "disabled"}>Navigate active tab</button>
+          <button type="button" class="primary-button" data-action="browse-navigate" ${activeTab ? "" : "disabled"}>Navigate active tab</button>
         </div>
       </section>
       <div class="content-stage-wrap ${layout.focusMode === "on" ? "content-stage-wrap--focus" : ""}">
@@ -262,7 +266,10 @@ function createContentStage(layout, data) {
         </article>
       </div>
       <footer class="workspace-bottombar workspace-bottombar--${layout.bottomBarState}">
-        <span>${escapeHtml(data.bottomMessage)}</span>
+        <div class="workspace-bottombar__content">
+          <span>${escapeHtml(data.bottomMessage)}</span>
+          <button type="button" class="ghost-button" data-action="toggle-bottom-bar">Bottom bar</button>
+        </div>
       </footer>
     </section>
   `;

@@ -23,6 +23,7 @@ export function createServiceHandler(context) {
     environment: context.runtime.environment,
     persistenceMode: context.runtime.persistenceMode,
     persistPathConfigured: context.runtime.persistPathConfigured,
+    firebaseConfigured: context.runtime.firebaseConfigured,
     startupWarnings: context.runtime.startupWarnings,
     startedAt: context.runtime.startedAt
   }), { authRequired: false }));

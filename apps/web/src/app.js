@@ -6,8 +6,10 @@ import { browseClose, browseNavigate, browseOpen } from "./features/browse/api.j
 import { approveTransfer, completeTransfer, createTransfer, previewTransfer } from "./features/file-transfer/api.js";
 import {
   createDefaultLayoutState,
+  mergeLayoutState,
   reduceLayoutState,
   toLayoutPreferencePayload,
+  toggleBarState,
   toggleFocusMode,
   toggleSidePanel
 } from "./features/layout/state.js";
@@ -33,7 +35,7 @@ function createInitialState() {
   return {
     sessionStatus: "loading",
     session: null,
-    layout: loadLayoutState() ?? createDefaultLayoutState(),
+    layout: mergeLayoutState(createDefaultLayoutState(), loadLayoutState() ?? {}),
     banners: [],
     statusMessage: "Checking current session.",
     sites: [],
@@ -157,7 +159,7 @@ async function refreshWorkspaceData(store, projectId = null) {
     activeTabId: tabs[0]?.tabId ?? state.activeTabId,
     currentUrl: tabs[0]?.currentUrl ?? state.currentUrl,
     activeLayoutPreferenceId,
-    layout: resolvedLayout?.resolvedPreference ? { ...state.layout, ...resolvedLayout.resolvedPreference } : state.layout
+    layout: resolvedLayout?.resolvedPreference ? mergeLayoutState(state.layout, resolvedLayout.resolvedPreference) : state.layout
   }));
 }
 
@@ -328,6 +330,16 @@ async function handleAction(store, action, targetElement, documentRef) {
       store.setState((state) => ({
         ...state,
         layout: toggleSidePanel(state.layout, panelKey)
+      }));
+      await persistLayoutPreference(store);
+      return;
+    }
+
+    if (action === "toggle-top-bar" || action === "toggle-bottom-bar") {
+      const panelKey = action === "toggle-top-bar" ? "topBarState" : "bottomBarState";
+      store.setState((state) => ({
+        ...state,
+        layout: toggleBarState(state.layout, panelKey)
       }));
       await persistLayoutPreference(store);
       return;

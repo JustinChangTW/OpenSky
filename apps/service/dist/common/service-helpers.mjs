@@ -47,7 +47,7 @@ export function withRoute(handler, { authRequired = true } = {}) {
 
     try {
       assertServiceReady(request, traceId, authRequired);
-      const actor = authRequired ? requireActor(request, context, traceId) : null;
+      const actor = authRequired ? await requireActor(request, context, traceId) : null;
       return await handler({ request, context, params, url, traceId, actor });
     } catch (error) {
       const structuredError = asStructuredError(error, traceId);
@@ -68,9 +68,9 @@ export function assertServiceReady(request, traceId, authRequired) {
   }
 }
 
-export function requireActor(request, context, traceId) {
+export async function requireActor(request, context, traceId) {
   const token = request.headers.get("x-opensky-session")?.trim();
-  const session = context.store.state.auth.session;
+  const session = await context.store.getSession();
 
   if (!token || !session || session.token !== token || session.signedIn !== true) {
     throw createErrorResponse(ERROR_CODES.AUTH_REQUIRED, "You must sign in to continue.", "Sign in as the owner-admin user.", traceId);
@@ -79,25 +79,34 @@ export function requireActor(request, context, traceId) {
   return session;
 }
 
-export function getRecord(map, id, errorCode, traceId, label) {
-  const record = map.get(id);
+export async function getRecord(context, collectionName, id, errorCode, traceId, label) {
+  const record = await context.store.get(collectionName, id);
   if (!record || record.status === "deleted") {
     throw createErrorResponse(errorCode, `${label} was not found.`, `Refresh the page and select an existing ${label.toLowerCase()}.`, traceId);
   }
   return record;
 }
 
-export function listRecords(map) {
-  return Array.from(map.values()).filter((item) => item.status !== "deleted");
+export async function listRecords(context, collectionName) {
+  const items = await context.store.list(collectionName);
+  return items.filter((item) => item.status !== "deleted");
 }
 
-export function writeAudit(context, payload) {
-  const eventId = context.store.nextId("event");
+export async function writeRecord(context, collectionName, id, record) {
+  return context.store.set(collectionName, id, record);
+}
+
+export async function deleteRecord(context, collectionName, id) {
+  return context.store.delete(collectionName, id);
+}
+
+export async function writeAudit(context, payload) {
+  const eventId = await context.store.nextId("event");
   const event = {
     eventId,
     ...createAuditEvent(payload)
   };
-  context.store.state.audit.set(eventId, event);
+  await context.store.set("audit", eventId, event);
   return event;
 }
 
@@ -107,8 +116,8 @@ export function derivePageTitle(currentUrl, displayName = "OpenSky") {
   return `${displayName} - ${suffix}`;
 }
 
-export function resolveLayoutPreference(context, projectId = null) {
-  const items = listRecords(context.store.state.layoutPreferences);
+export async function resolveLayoutPreference(context, projectId = null) {
+  const items = await listRecords(context, "layoutPreferences");
   const projectPreference = projectId ? items.find((item) => item.scope === "project" && item.projectId === projectId) : null;
   const globalPreference = items.find((item) => item.scope === "global");
 

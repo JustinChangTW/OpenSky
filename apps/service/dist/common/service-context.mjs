@@ -1,4 +1,4 @@
-import { createFileStore, createMemoryStore } from "../../../../packages/persistence/src/common/store.mjs";
+import { createFileStore, createFirebaseStore, createMemoryStore } from "../../../../packages/persistence/src/common/store.mjs";
 import { createRuntimeDiagnostics, createServiceConfig } from "./service-config.mjs";
 
 export function createServiceContext({ persistPath, env = process.env } = {}) {
@@ -11,6 +11,10 @@ export function createServiceContext({ persistPath, env = process.env } = {}) {
   return {
     config,
     runtime: createRuntimeDiagnostics(config),
-    store: config.persistenceMode === "file" ? createFileStore(config.persistPath) : createMemoryStore()
+    store: config.persistenceMode === "firestore"
+      ? createFirebaseStore(config.firebase)
+      : config.persistenceMode === "file"
+        ? createFileStore(config.persistPath)
+        : createMemoryStore()
   };
 }
