@@ -9,12 +9,13 @@ const issues = [];
 for (const filePath of files) {
   const text = await fs.readFile(filePath, "utf8");
   const lines = text.split(/\r?\n/u);
+  const isMarkdown = path.extname(filePath) === ".md";
 
   lines.forEach((line, index) => {
     if (line.includes("\t")) {
       issues.push(`${toProjectRelative(rootDir, filePath)}:${index + 1} uses tab indentation`);
     }
-    if (/[ \t]+$/u.test(line)) {
+    if (!isMarkdown && /[ \t]+$/u.test(line)) {
       issues.push(`${toProjectRelative(rootDir, filePath)}:${index + 1} has trailing whitespace`);
     }
   });
