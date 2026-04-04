@@ -5,6 +5,8 @@
 - Build static assets from `apps/web/src` into `apps/web/dist`
 - Publish `apps/web/dist` to GitHub Pages
 - The frontend remains static-only and consumes the Render backend API
+- Use `.github/workflows/pages.yml` to deploy the `apps/web/dist` artifact to GitHub Pages
+- Set the GitHub Actions repository variable `OPEN_SKY_API_BASE` so `config.js` points the frontend at the Render backend
 
 ## Backend
 
@@ -25,3 +27,4 @@
 - If file-backed persistence is enabled, plan for Render instance-local storage semantics rather than multi-instance shared storage
 - `/health` now exposes runtime diagnostics for environment, persistence mode, `firebaseConfigured`, startup warnings, and process start time
 - Firestore use should keep the existing `/v1/*` contracts stable and remain a durable data store only, not a proxy layer
+- The frontend Pages deploy now depends on `config.js`; if `OPEN_SKY_API_BASE` is empty, the static frontend will incorrectly call relative `/v1/*` paths on the Pages origin

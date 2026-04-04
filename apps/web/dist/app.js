@@ -119,6 +119,7 @@ async function persistLayoutPreference(store) {
 }
 
 async function refreshWorkspaceData(store, projectId = null) {
+  const previousState = store.getState();
   const [sitesPayload, projectsPayload, vaultPayload, auditPayload] = await Promise.all([
     fetchSites().catch(() => ({ items: [] })),
     fetchProjects().catch(() => ({ items: [] })),
@@ -130,8 +131,9 @@ async function refreshWorkspaceData(store, projectId = null) {
   const projects = normalizeItems(projectsPayload);
   const vaultItems = normalizeItems(vaultPayload);
   const auditItems = normalizeItems(auditPayload);
-  const activeProjectId = projectId ?? store.getState().activeProjectId ?? projects[0]?.projectId ?? null;
-  const activeSiteId = store.getState().activeSiteId ?? sites[0]?.siteId ?? null;
+  const activeProjectId = projectId ?? previousState.activeProjectId ?? projects[0]?.projectId ?? null;
+  const activeProject = projects.find((item) => item.projectId === activeProjectId) ?? null;
+  const activeSiteId = previousState.activeSiteId ?? activeProject?.defaultSiteId ?? sites[0]?.siteId ?? null;
   const [tabsPayload, bookmarksPayload, notesPayload] = activeProjectId
     ? await Promise.all([
         fetchTabs(activeProjectId).catch(() => ({ items: [] })),
@@ -142,8 +144,9 @@ async function refreshWorkspaceData(store, projectId = null) {
   const tabs = normalizeItems(tabsPayload);
   const bookmarks = normalizeItems(bookmarksPayload);
   const notes = normalizeItems(notesPayload);
-  const resolvedLayout = activeProjectId ? await fetchLayoutPreference(activeProjectId).catch(() => null) : null;
+  const resolvedLayout = await fetchLayoutPreference(activeProjectId ?? undefined).catch(() => null);
   const activeLayoutPreferenceId = resolvedLayout?.resolvedPreference?.layoutPreferenceId ?? null;
+  const nextActiveTab = tabs.find((tab) => tab.tabId === previousState.activeTabId) ?? tabs[0] ?? null;
 
   store.setState((state) => ({
     ...state,
@@ -156,8 +159,8 @@ async function refreshWorkspaceData(store, projectId = null) {
     tabs,
     activeProjectId,
     activeSiteId,
-    activeTabId: tabs[0]?.tabId ?? state.activeTabId,
-    currentUrl: tabs[0]?.currentUrl ?? state.currentUrl,
+    activeTabId: nextActiveTab?.tabId ?? null,
+    currentUrl: nextActiveTab?.currentUrl ?? state.currentUrl,
     activeLayoutPreferenceId,
     layout: resolvedLayout?.resolvedPreference ? mergeLayoutState(state.layout, resolvedLayout.resolvedPreference) : state.layout
   }));

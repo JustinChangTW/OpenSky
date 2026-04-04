@@ -192,6 +192,7 @@ function createContentStage(layout, data) {
   const activeTab = data.tabs.find((tab) => tab.tabId === data.activeTabId) ?? null;
   const urlValue = data.currentUrl || activeTab?.currentUrl || "";
   const activeTabTitle = activeTab?.pageTitle || activeTab?.currentUrl || "Allowlisted site viewport";
+  const activeSiteDomain = data.activeSite?.baseDomains?.[0] ?? "selected allowlisted domain";
 
   return `
     <section class="workspace-content">
@@ -216,6 +217,8 @@ function createContentStage(layout, data) {
           <span>Site: ${escapeHtml(data.activeSite?.displayName ?? "none")}</span>
           <span>View: ${escapeHtml(layout.viewMode)}</span>
           <span>Focus: ${escapeHtml(layout.focusMode)}</span>
+          <span>Top bar: ${escapeHtml(layout.topBarState)}</span>
+          <span>Bottom bar: ${escapeHtml(layout.bottomBarState)}</span>
         </div>
         <div class="stack-actions">
           ${data.activeSite && data.activeProject ? `<button type="button" class="primary-button" data-action="open-site" data-site-id="${data.activeSite.siteId}">Open selected site</button>` : ""}
@@ -225,12 +228,12 @@ function createContentStage(layout, data) {
       ${renderTabs(data)}
       <section class="workspace-urlbar">
         <div class="workspace-urlbar__header">
-          <p class="eyebrow">Controlled navigation</p>
-          <p class="workspace-urlbar__note">Open a site from the allowlisted site list first. Use this field to navigate the active tab only.</p>
+          <p class="eyebrow">Active tab navigation</p>
+          <p class="workspace-urlbar__note">Open a site from the allowlisted site list first. This field only updates the current tab and still requires an allowlisted URL on ${escapeHtml(activeSiteDomain)}.</p>
         </div>
         <label class="workspace-urlbar__field">
-          <span class="workspace-urlbar__label">Active tab URL</span>
-          <input data-url-input type="url" value="${escapeHtml(urlValue)}" placeholder="https://allowlisted.example/path" ${activeTab ? "" : "disabled"} />
+          <span class="workspace-urlbar__label">Current allowlisted URL</span>
+          <input data-url-input type="url" value="${escapeHtml(urlValue)}" placeholder="https://${escapeHtml(activeSiteDomain)}/team/path" ${activeTab ? "" : "disabled"} />
         </label>
         <div class="stack-actions">
           <button type="button" class="primary-button" data-action="browse-navigate" ${activeTab ? "" : "disabled"}>Navigate active tab</button>

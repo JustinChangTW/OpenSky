@@ -1,0 +1,58 @@
+name: pages
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Build
+        run: node scripts/build.mjs
+
+      - name: Inject frontend config
+        shell: bash
+        env:
+          OPEN_SKY_API_BASE: ${{ vars.OPEN_SKY_API_BASE }}
+        run: |
+          cat <<EOF > apps/web/dist/config.js
+          globalThis.OPEN_SKY_CONFIG = {
+            apiBase: "${OPEN_SKY_API_BASE}"
+          };
+          EOF
+          touch apps/web/dist/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
