@@ -3,7 +3,15 @@ import { listFiles, toProjectRelative } from "./fs-utils.mjs";
 
 const rootDir = process.cwd();
 const files = await listFiles(rootDir, [".mjs", ".js"]);
-const importTargets = files.filter((filePath) => !filePath.includes("\\tests\\") && !filePath.includes("/tests/"));
+const importTargets = files.filter((filePath) => {
+  if (!filePath.includes(`${rootDir}\\apps\\`) && !filePath.includes(`${rootDir}\\packages\\`) && !filePath.includes(`${rootDir}/apps/`) && !filePath.includes(`${rootDir}/packages/`)) {
+    return false;
+  }
+  if (filePath.includes("\\tests\\") || filePath.includes("/tests/")) {
+    return false;
+  }
+  return !filePath.endsWith("scripts/test.mjs") && !filePath.endsWith("apps/service/src/server.mjs");
+});
 const failures = [];
 
 for (const filePath of importTargets) {

@@ -15,8 +15,14 @@ const buildTargets = [
 ];
 
 for (const target of buildTargets) {
-  await fs.rm(target.target, { recursive: true, force: true });
   await ensureDir(target.target);
+  try {
+    await fs.rm(target.target, { recursive: true, force: true });
+    await ensureDir(target.target);
+  } catch {
+    // OneDrive or another process may momentarily lock build artifacts.
+    // Continue by copying over the existing directory contents.
+  }
   await copyDir(target.source, target.target);
 }
 
