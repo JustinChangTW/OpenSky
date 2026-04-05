@@ -1,1274 +1,312 @@
-\# OpenSky Working Agreements
+﻿# OpenSky Working Agreements
 
+## Project Goal
 
+OpenSky 是一個單一使用者、allowlist-based 的外部網站工作區。
 
-This repository implements \*\*OpenSky\*\*.
+固定架構：
 
+- Frontend: GitHub Pages static site
+- Backend: Render Web Service
 
+固定產品邊界：
 
-OpenSky is a \*\*single-user, allowlist-based external site workspace\*\* with the following architecture:
+- allowlist-only
+- single-user owner-admin
+- center-content-first UI
+- default workspace mode = `maximized`
 
+本 repo 的工作原則是：
 
+- 先讀 spec 與現況
+- 先確認事實
+- 最小改動
+- 不把猜測寫成事實
+- 不把 backend 邏輯塞進 frontend
 
-\- \*\*Frontend\*\*: GitHub Pages static site
+## Read First
 
-\- \*\*Backend\*\*: Render Web Service
+開始任何修改前，依序閱讀：
 
-\- \*\*Primary UX goal\*\*: maximize the central website display area
+1. `docs/specs/opensky-codex-spec-final.md`
+2. `AGENTS.md`
+3. `CLAUDE.md`
+4. `SKILL.md`
+5. 相關 feature 的 source / tests / contracts
 
-\- \*\*Default workspace mode\*\*: `maximized`
+## Product Boundary
 
+OpenSky 不是：
 
+- general-purpose proxy
+- arbitrary URL browser
+- network restriction bypass tool
+- public multi-user platform
 
-This file defines how work should be performed in this repo.
+OpenSky 是：
 
+- controlled workspace for one owner-admin user
+- allowlist-only external site entry system
+- project-based persistent workspace
+- UI that prioritizes the central content area
 
+## Hard Constraints
 
-\---
+### Allowlist-only
 
+所有 navigation 都必須先過 allowlist 驗證。
 
+不要加入：
 
-\## 1. Product Boundary
+- arbitrary URL browsing
+- hidden allowlist bypass
+- open-anything shortcuts
 
+### Single-user
 
+除非任務明確改 auth model，否則只假設一位 owner-admin。
 
-OpenSky is \*\*not\*\*:
+### GitHub Pages is frontend-only
 
-\- a general-purpose proxy
+Frontend 只能負責：
 
-\- an arbitrary URL browser
+- static rendering
+- local UI state
+- layout controls
+- backend API calls
 
-\- a network restriction bypass tool
+Frontend 不應負責：
 
-\- a public multi-user sharing platform
+- trusted auth/session logic
+- allowlist enforcement
+- secure persistence of external site secrets
+- browse gateway logic
 
+### Render owns dynamic behavior
 
+Backend 目前負責：
 
-OpenSky \*\*is\*\*:
+- auth/session verification
+- allowlist enforcement
+- persistence APIs
+- browse / session vault / file transfer / audit
+- warmup / service-unavailable behavior
 
-\- a controlled workspace for one owner-admin user
+### UI constraints
 
-\- an allowlist-only external site entry system
+必須維持：
 
-\- a project-based workspace with persistent state
+- center-content-first
+- `maximized` default
+- fullscreen failure -> fallback to `maximized`
+- uploads require preview before approve
+- zoom / resize / preview preserve aspect ratio
+- unsupported behavior must be explicit, never silent
 
-\- a UI that prioritizes central content over peripheral controls
+### Future LLM rule
 
+目前 MVP 不包含內建 LLM 功能。
 
+若未來新增 LLM：
 
-Do not implement features that violate this boundary unless the task explicitly redefines the product.
+- all outputs must stream
 
+## Actual Repo Facts You Must Respect
 
+### Tech stack
 
-\---
+目前 repo 實際使用：
 
+- Node.js ESM monorepo
+- npm workspaces
+- native HTML / CSS / JS modules
+- native Node `http` backend
+- repo-local scripts for lint / typecheck / test / build
+- Node `node:test`
 
+目前 repo 沒有：
 
-\## 2. Hard Constraints
+- frontend dev server script
+- React / Vue / Next / Vite
+- Express / Fastify
+- `render.yaml`
+- `firebase.json`
+- `firestore.rules`
+- `storage.rules`
 
+### Deployment reality
 
+- GitHub Pages workflow: `.github/workflows/pages.yml`
+- CI workflow: `.github/workflows/ci.yml`
+- frontend deploy depends on `OPEN_SKY_API_BASE`
+- backend entrypoint: `apps/service/src/server.mjs`
+- backend env parsing: `apps/service/src/common/service-config.mjs`
+- persistence implementation: `packages/persistence/src/common/store.mjs`
 
-These rules are mandatory.
+### Firebase reality
 
+目前 repo 只使用 Firebase / GCP 的 Firestore persistence path。
 
+不要假設有：
 
-\### 2.1 Allowlist-only
+- Firebase Auth
+- Firebase Storage
+- emulator wiring
+- rules files in repo
 
-All navigation must be validated against the configured allowlist before execution.
+## Allowed Modification Areas
 
+一般任務可修改：
 
+- `README.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `SKILL.md`
+- `docs/**`
+- `apps/web/**`
+- `apps/service/**`
+- `packages/**`
+- `.github/workflows/**`
+- `scripts/**`
 
-Never add:
+但必須遵守本文件的敏感區域規則。
 
-\- arbitrary URL browsing
+## Sensitive Areas
 
-\- “open any URL” shortcuts
+以下區域需要特別小心，不能無理由亂動：
 
-\- fallback behavior that silently bypasses allowlist rules
+### Backend runtime and env
 
+- `apps/service/src/common/service-config.mjs`
+- `apps/service/src/common/service-context.mjs`
+- `apps/service/src/server.mjs`
 
+風險：
 
-\### 2.2 Single-user model
+- deployment failure
+- invalid env assumptions
+- production boot regression
 
-Assume exactly one owner-admin user unless a task explicitly changes the auth model.
+### Persistence and Firebase path
 
+- `packages/persistence/src/common/store.mjs`
 
+風險：
 
-\### 2.3 GitHub Pages is frontend-only
+- data loss
+- Firestore auth breakage
+- file-backed persistence regression
 
-Do not move backend responsibilities into the frontend.
+### GitHub Pages API base wiring
 
+- `.github/workflows/pages.yml`
+- `apps/web/src/config.js`
+- `apps/web/src/features/auth/session.js`
 
+風險：
 
-Frontend may handle:
+- frontend deploy succeeds but all API calls fail
+- Pages origin accidentally calling relative `/v1/*`
 
-\- rendering
+### Import / schema work
 
-\- local UI state
+目前 repo 沒找到明確的題庫匯入 pipeline 或 import schema 檔。
 
-\- layout control
+因此：
 
-\- user interaction
+- 不要假設已有 import system
+- 不要捏造 schema
+- 若任務提到匯入 / schema，先重新 discovery，確認實際檔案與流程
 
-\- calling backend APIs
+## Change Strategy
 
+### Prefer minimal diffs
 
+先做最小改動，不要為了文件整理而順便重構整個 repo。
 
-Frontend must not be treated as the place for:
+### Preserve contracts
 
-\- policy enforcement
+除非任務明確要求，避免無故改動：
 
-\- trusted auth/session logic
+- `/v1/*` API contracts
+- shared contracts
+- persistence semantics
+- layout preference semantics
 
-\- secure persistence of external site session secrets
+### Reuse existing patterns
 
-\- backend-only browsing logic
+改任何東西前，先讀：
 
+1. target file
+2. adjacent tests
+3. related contracts
+4. related docs
 
+### Do not invent missing infrastructure
 
-\### 2.4 Render backend owns dynamic behavior
+如果 repo 沒有：
 
-Backend owns:
+- `render.yaml`
+- Firebase rules
+- `.env.example`
+- frontend dev server
 
-\- auth/session verification
+就要明寫「目前不存在」，不要在 README 或其他文件假裝它們已經存在。
 
-\- allowlist enforcement
+## Minimum Validation
 
-\- persistence APIs
+### Docs-only changes
 
-\- browse/open/navigate/close flows
+至少跑：
 
-\- external session persistence
+- `npm run lint`
+- `npm run typecheck`
+- `npm run test`
+- `npm run build`
 
-\- file preview/upload/download flow
+另外要人工核對：
 
-\- audit logging
+- README 指令是否真的對應 `package.json`
+- env 名稱是否真的在程式裡出現
+- GitHub Pages / Render / Firebase 描述是否忠於 repo 現況
 
+### Frontend changes
 
+另外要確認：
 
-\### 2.5 No plaintext external passwords by default
+- `maximized` default
+- fullscreen fallback
+- layout persistence
+- API base wiring
 
-Do not introduce default plaintext password storage for external sites.
+### Backend / env / persistence changes
 
+另外要確認：
 
+- production gating
+- file-backed persistence
+- Firestore path
+- `/health` diagnostics
 
-\### 2.6 Uploads require preview
+## Progress Reporting
 
-Any upload flow must require preview before final submission.
+主線或 subagent 在重要節點要回報：
 
+- 已完成
+- 進行中
+- 阻塞 / 風險
+- 下一步
 
+回報應該像 PM update，不要只是貼一串原始輸出。
 
-\### 2.7 Preserve aspect ratio
+## Final Handoff Format
 
-Any preview, zoom, resize, scaling, or content display change must preserve aspect ratio.
+完成工作時，依序輸出：
 
+1. Files changed
+2. What was implemented
+3. Commands run
+4. Test results
+5. Known risks / unsupported cases
 
-
-\### 2.8 Center-content-first UI
-
-The center website display area is the primary UI concern.
-
-
-
-Do not regress this priority by:
-
-\- adding permanently expanded sidebars by default
-
-\- turning the interface into a dashboard-first layout
-
-\- consuming large portions of width with secondary controls
-
-
-
-\### 2.9 Default mode is maximized
-
-New workspace sessions should default to `maximized` unless persisted preferences override it.
-
-
-
-\### 2.10 Fullscreen fallback
-
-If fullscreen cannot be entered, the UI must fall back to `maximized` and surface a clear user-facing reason.
-
-
-
-\### 2.11 No silent failure
-
-Unsupported site behavior must be surfaced clearly. Never fail silently.
-
-
-
-\### 2.12 Future LLM rule
-
-This repo does not include built-in LLM features in MVP.
-
-
-
-If LLM functionality is added later, \*\*all outputs must be streamed\*\*.
-
-
-
-\---
-
-
-
-\## 3. Primary Entities
-
-
-
-The following entities are core and should remain explicit in code, contracts, persistence, and tests.
-
-
-
-\### AllowedSite
-
-Key responsibilities:
-
-\- site metadata
-
-\- allowlist rules
-
-\- site-level feature flags
-
-
-
-Expected fields:
-
-\- `siteId`
-
-\- `displayName`
-
-\- `baseDomains\[]`
-
-\- `pathRules\[]`
-
-\- `defaultRenderMode`
-
-\- `loginPersistenceAllowed`
-
-\- `downloadAllowed`
-
-\- `uploadAllowed`
-
-\- `status`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-Expected statuses:
-
-\- `active`
-
-\- `disabled`
-
-\- `archived`
-
-\- `deleted`
-
-
-
-\### WorkspaceProject
-
-Expected fields:
-
-\- `projectId`
-
-\- `name`
-
-\- `description`
-
-\- `defaultSiteId`
-
-\- `status`
-
-\- `lastOpenedAt`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-Expected statuses:
-
-\- `draft`
-
-\- `active`
-
-\- `paused`
-
-\- `archived`
-
-\- `deleted`
-
-
-
-\### WorkspaceTab
-
-Expected fields:
-
-\- `tabId`
-
-\- `projectId`
-
-\- `siteId`
-
-\- `entryUrl`
-
-\- `currentUrl`
-
-\- `pageTitle`
-
-\- `renderMode`
-
-\- `scrollPosition`
-
-\- `zoomRatio`
-
-\- `pinned`
-
-\- `status`
-
-\- `lastVisitedAt`
-
-
-
-Expected statuses:
-
-\- `open`
-
-\- `suspended`
-
-\- `closed`
-
-\- `deleted`
-
-
-
-\### Bookmark
-
-Expected fields:
-
-\- `bookmarkId`
-
-\- `projectId?`
-
-\- `siteId`
-
-\- `url`
-
-\- `title`
-
-\- `note`
-
-\- `status`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-Expected statuses:
-
-\- `active`
-
-\- `archived`
-
-\- `deleted`
-
-
-
-\### Note
-
-Expected fields:
-
-\- `noteId`
-
-\- `projectId`
-
-\- `relatedTabId?`
-
-\- `title`
-
-\- `content`
-
-\- `status`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-Expected statuses:
-
-\- `active`
-
-\- `archived`
-
-\- `deleted`
-
-
-
-\### ExternalSessionVault
-
-Expected fields:
-
-\- `vaultId`
-
-\- `siteId`
-
-\- `projectId?`
-
-\- `persistenceScope`
-
-\- `secretType`
-
-\- `rememberUntil`
-
-\- `status`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-Expected statuses:
-
-\- `active`
-
-\- `expired`
-
-\- `revoked`
-
-\- `deleted`
-
-
-
-\### FileTransferItem
-
-Expected fields:
-
-\- `itemId`
-
-\- `projectId`
-
-\- `siteId`
-
-\- `direction`
-
-\- `originalName`
-
-\- `mimeType`
-
-\- `sizeBytes`
-
-\- `previewStatus`
-
-\- `transferStatus`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-Expected statuses:
-
-\- `pending`
-
-\- `preview\_ready`
-
-\- `approved`
-
-\- `completed`
-
-\- `failed`
-
-\- `deleted`
-
-
-
-\### AuditEvent
-
-Expected fields:
-
-\- `eventId`
-
-\- `actorId`
-
-\- `action`
-
-\- `targetType`
-
-\- `targetId`
-
-\- `result`
-
-\- `occurredAt`
-
-\- `retentionState`
-
-
-
-Expected statuses:
-
-\- `active`
-
-\- `redacted`
-
-\- `purged`
-
-
-
-\### LayoutPreference
-
-Expected fields:
-
-\- `layoutPreferenceId`
-
-\- `scope`
-
-\- `projectId?`
-
-\- `leftPanelState`
-
-\- `rightPanelState`
-
-\- `topBarState`
-
-\- `bottomBarState`
-
-\- `viewMode`
-
-\- `focusMode`
-
-\- `contentZoomRatio`
-
-\- `createdAt`
-
-\- `updatedAt`
-
-
-
-\---
-
-
-
-\## 4. State and Persistence Rules
-
-
-
-The following state must persist correctly:
-
-
-
-\- project state
-
-\- tabs state
-
-\- bookmarks
-
-\- notes
-
-\- current URL
-
-\- page title
-
-\- scroll position
-
-\- zoom ratio
-
-\- left panel state
-
-\- right panel state
-
-\- top bar state
-
-\- bottom bar state
-
-\- view mode
-
-\- focus mode
-
-\- valid external session persistence
-
-
-
-Preference precedence:
-
-1\. project-scoped preference
-
-2\. global preference
-
-3\. system default
-
-
-
-Do not store layout state only in ephemeral in-memory UI state if the product expects restoration.
-
-
-
-\---
-
-
-
-\## 5. UI Rules
-
-
-
-\### 5.1 View modes
-
-Supported view modes:
-
-\- `standard`
-
-\- `maximized`
-
-\- `fullscreen`
-
-
-
-\### 5.2 Panels
-
-Left and right panels must support:
-
-\- `expanded`
-
-\- `collapsed`
-
-\- `hidden`
-
-
-
-Top bar must support:
-
-\- `expanded`
-
-\- `compact`
-
-\- `autoHide`
-
-\- `hidden`
-
-
-
-Bottom bar must support:
-
-\- `expanded`
-
-\- `collapsed`
-
-\- `autoHide`
-
-\- `hidden`
-
-
-
-\### 5.3 Default UX
-
-\- `maximized` should be the default workspace mode
-
-\- side panels should default toward minimal visibility
-
-\- top and bottom bars should not permanently reduce content area without good reason
-
-
-
-\### 5.4 Fullscreen behavior
-
-\- fullscreen should be user-triggered
-
-\- if fullscreen fails, fallback to `maximized`
-
-\- show a user-facing reason with actionable guidance if possible
-
-
-
-\### 5.5 Focus mode
-
-If focus mode exists, it should reduce distractions and preserve content-area priority.
-
-
-
-\### 5.6 Layout regression rule
-
-Any UI change that reduces central content area must be treated as a possible regression unless explicitly requested.
-
-
-
-\---
-
-
-
-\## 6. API Expectations
-
-
-
-Preserve these endpoint groups unless a task explicitly redesigns contracts.
-
-
-
-\### Auth
-
-\- `POST /v1/auth/sign-in`
-
-\- `POST /v1/auth/sign-out`
-
-\- `GET /v1/me`
-
-
-
-\### Sites
-
-\- `GET /v1/sites`
-
-\- `POST /v1/sites`
-
-\- `GET /v1/sites/{siteId}`
-
-\- `PATCH /v1/sites/{siteId}`
-
-\- `DELETE /v1/sites/{siteId}`
-
-
-
-\### Projects
-
-\- `GET /v1/projects`
-
-\- `POST /v1/projects`
-
-\- `GET /v1/projects/{projectId}`
-
-\- `PATCH /v1/projects/{projectId}`
-
-\- `DELETE /v1/projects/{projectId}`
-
-
-
-\### Tabs
-
-\- `GET /v1/projects/{projectId}/tabs`
-
-\- `POST /v1/projects/{projectId}/tabs`
-
-\- `PATCH /v1/projects/{projectId}/tabs/{tabId}`
-
-\- `DELETE /v1/projects/{projectId}/tabs/{tabId}`
-
-
-
-\### Bookmarks
-
-\- `GET /v1/bookmarks`
-
-\- `POST /v1/bookmarks`
-
-\- `PATCH /v1/bookmarks/{bookmarkId}`
-
-\- `DELETE /v1/bookmarks/{bookmarkId}`
-
-
-
-\### Notes
-
-\- `GET /v1/notes`
-
-\- `POST /v1/notes`
-
-\- `PATCH /v1/notes/{noteId}`
-
-\- `DELETE /v1/notes/{noteId}`
-
-
-
-\### Browse
-
-\- `POST /v1/browse/open`
-
-\- `POST /v1/browse/navigate`
-
-\- `POST /v1/browse/close`
-
-
-
-\### Session Vault
-
-\- `GET /v1/session-vault`
-
-\- `POST /v1/session-vault`
-
-\- `PATCH /v1/session-vault/{vaultId}`
-
-\- `DELETE /v1/session-vault/{vaultId}`
-
-
-
-\### File Transfer
-
-\- `POST /v1/file-transfer`
-
-\- `POST /v1/file-transfer/{itemId}/preview`
-
-\- `POST /v1/file-transfer/{itemId}/approve`
-
-\- `POST /v1/file-transfer/{itemId}/complete`
-
-\- `DELETE /v1/file-transfer/{itemId}`
-
-
-
-\### Audit
-
-\- `GET /v1/audit`
-
-
-
-\### Layout Preferences
-
-\- `GET /v1/layout-preferences`
-
-\- `POST /v1/layout-preferences`
-
-\- `PATCH /v1/layout-preferences/{layoutPreferenceId}`
-
-\- `DELETE /v1/layout-preferences/{layoutPreferenceId}`
-
-
-
-\---
-
-
-
-\## 7. Error Handling Rules
-
-
-
-Every user-facing error must include:
-
-\- `code`
-
-\- `message`
-
-\- `userAction`
-
-\- `traceId`
-
-
-
-Preferred error codes include:
-
-\- `AUTH\_REQUIRED`
-
-\- `FORBIDDEN`
-
-\- `SITE\_NOT\_FOUND`
-
-\- `SITE\_DISABLED`
-
-\- `URL\_NOT\_ALLOWED`
-
-\- `PROJECT\_NOT\_FOUND`
-
-\- `TAB\_NOT\_FOUND`
-
-\- `BOOKMARK\_NOT\_FOUND`
-
-\- `NOTE\_NOT\_FOUND`
-
-\- `SESSION\_VAULT\_NOT\_FOUND`
-
-\- `SESSION\_EXPIRED`
-
-\- `LOGIN\_PERSISTENCE\_DISABLED`
-
-\- `UPLOAD\_PREVIEW\_REQUIRED`
-
-\- `FILE\_TYPE\_NOT\_ALLOWED`
-
-\- `DOWNLOAD\_DISABLED`
-
-\- `UPLOAD\_DISABLED`
-
-\- `CONFLICT\_RETRY`
-
-\- `SERVICE\_UNAVAILABLE`
-
-\- `INVALID\_INPUT`
-
-\- `FULLSCREEN\_NOT\_AVAILABLE`
-
-
-
-Never replace a specific actionable error with a generic opaque one.
-
-
-
-\---
-
-
-
-\## 8. Change Strategy
-
-
-
-\### 8.1 Prefer minimal diffs
-
-Make the smallest change that fully solves the task.
-
-
-
-\### 8.2 Preserve contracts
-
-Avoid unnecessary breaking changes to:
-
-\- shared types
-
-\- API contracts
-
-\- persistence formats
-
-\- layout preference semantics
-
-
-
-\### 8.3 Reuse existing patterns
-
-Before introducing a new abstraction:
-
-1\. read the target feature
-
-2\. read adjacent tests
-
-3\. read related contracts
-
-4\. search for project-standard patterns
-
-
-
-Prefer extension over duplication.
-
-
-
-\### 8.4 Keep boundaries clean
-
-Do not mix:
-
-\- layout preference logic into unrelated domain models
-
-\- allowlist policy into random UI utilities
-
-\- backend-only logic into frontend convenience helpers
-
-
-
-\### 8.5 Explicit unsupported cases
-
-If a site interaction cannot be supported, report it explicitly in code comments, tests, and handoff.
-
-
-
-\---
-
-
-
-\## 9. Validation Requirements
-
-
-
-Run the relevant subset of the repository’s commands after meaningful changes.
-
-
-
-Typical validation includes:
-
-\- install
-
-\- lint
-
-\- typecheck
-
-\- test
-
-\- build
-
-
-
-Prefer repository-local scripts.
-
-
-
-\### Minimum validation by change type
-
-
-
-\#### UI-only changes
-
-Run:
-
-\- lint
-
-\- typecheck
-
-\- relevant UI tests
-
-\- frontend build
-
-
-
-Also verify:
-
-\- maximized mode
-
-\- panel toggle behavior
-
-\- layout persistence
-
-\- aspect ratio preservation
-
-
-
-\#### Backend/API changes
-
-Run:
-
-\- lint
-
-\- typecheck
-
-\- backend tests
-
-\- integration tests if present
-
-
-
-\#### Contract/model changes
-
-Run:
-
-\- lint
-
-\- typecheck
-
-\- all affected unit tests
-
-\- integration tests at contract boundaries
-
-
-
-\#### File transfer changes
-
-Also verify:
-
-\- preview required before upload
-
-\- unsupported file type handling
-
-\- transfer state transitions
-
-
-
-\#### Layout/fullscreen changes
-
-Also verify:
-
-\- default maximized state
-
-\- fullscreen fallback
-
-\- panel hide/collapse behavior
-
-\- preference restoration
-
-\- no layout breakage on reload
-
-
-
-\---
-
-
-
-\## 10. Tests That Matter Most
-
-
-
-Prioritize tests for:
-
-\- allowlist blocking
-
-\- blocked redirects
-
-\- project reopen restoration
-
-\- tab restoration
-
-\- layout preference restoration
-
-\- maximized mode defaults
-
-\- fullscreen fallback
-
-\- session restore / expiry / revoke
-
-\- preview-required uploads
-
-\- service unavailable / warmup handling
-
-\- aspect ratio preservation
-
-
-
-\---
-
-
-
-\## 11. Definition of Done
-
-
-
-A task is not done unless, where applicable:
-
-
-
-1\. The requested behavior is implemented.
-
-2\. Allowlist-only constraints are preserved.
-
-3\. Persistence rules are respected.
-
-4\. UI still prioritizes central content.
-
-5\. CRUD/state transitions are complete for affected entities.
-
-6\. Errors are structured and actionable.
-
-7\. Relevant tests were added or updated.
-
-8\. Validation commands were run.
-
-9\. Remaining risks or unsupported behavior are reported.
-
-
-
-\---
-
-
-
-\## 12. Final Handoff Format
-
-
-
-When finishing work, report in this order:
-
-
-
-1\. \*\*Files changed\*\*
-
-2\. \*\*What was implemented\*\*
-
-3\. \*\*Commands run\*\*
-
-4\. \*\*Test results\*\*
-
-5\. \*\*Known risks / unsupported cases\*\*
-
-
-
-Be explicit about incomplete work.
-
-
-
-\---
-
-
-
-\## 13. Repo Navigation Guidance
-
-
-
-When working in this repository, prefer this exploration order:
-
-
-
-1\. `docs/specs/opensky-codex-spec-final.md`
-
-2\. `AGENTS.md`
-
-3\. `CLAUDE.md` if present
-
-4\. shared contracts
-
-5\. persistence models
-
-6\. feature implementation
-
-7\. related tests
-
-
-
-If instructions conflict:
-
-1\. direct task requirements
-
-2\. latest product spec
-
-3\. AGENTS.md
-
-4\. other helper files
-
-
-
-\---
-
-
-
-\## 14. Do Not Introduce These Regressions
-
-
-
-Do not introduce:
-
-\- default expanded multi-panel layout that shrinks the content area
-
-\- hidden allowlist bypasses
-
-\- unstructured error responses
-
-\- upload without preview
-
-\- layout state loss on refresh/project reopen
-
-\- fullscreen failures that leave the UI broken
-
-\- plaintext password persistence by default
-
-\- silent unsupported-site behavior
-
-
-
-\---
-
-
-
-\## 15. Recommended Companion Files
-
-
-
-This file should work alongside:
-
-\- `docs/specs/opensky-codex-spec-final.md`
-
-\- `SKILL.md`
-
-\- `CLAUDE.md`
-
-
-
-If these files disagree, prefer the newest product spec unless the task explicitly says otherwise.
-
+若有未確認事項，必須明寫。
