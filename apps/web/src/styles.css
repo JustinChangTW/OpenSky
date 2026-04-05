@@ -105,6 +105,34 @@ body {
   color: var(--muted);
 }
 
+.service-status-card,
+.workspace-health {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.service-status-card p,
+.workspace-health span {
+  margin: 0;
+  color: var(--muted);
+}
+
+.service-status-card--ready,
+.workspace-health--ready {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.service-status-card--warning,
+.workspace-health--warning {
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .auth-form {
   display: grid;
   gap: 16px;
@@ -276,6 +304,23 @@ body {
   margin-top: 18px;
 }
 
+.panel-section--advanced {
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.panel-section__summary-toggle {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.panel-section__summary-toggle::marker {
+  color: var(--primary);
+}
+
 .data-list {
   list-style: none;
   margin: 0;
@@ -383,6 +428,49 @@ body {
   align-items: flex-start;
   gap: 16px;
   margin-top: 14px;
+}
+
+.workspace-workflow {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 1px solid rgba(14, 165, 233, 0.24);
+  border-radius: 22px;
+  background: rgba(14, 165, 233, 0.06);
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-workflow h2,
+.workspace-workflow p {
+  margin: 0;
+}
+
+.workspace-workflow__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.workspace-workflow__callout {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.workspace-workflow__callout strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.workspace-workflow__callout p {
+  color: var(--muted);
 }
 
 .panel-meta-group {
@@ -550,7 +638,8 @@ body {
   .workspace-settings__header,
   .content-stage__header,
   .content-controls,
-  .workspace-urlbar {
+  .workspace-urlbar,
+  .workspace-workflow__callout {
     align-items: flex-start;
     flex-direction: column;
   }

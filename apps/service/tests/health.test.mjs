@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -20,6 +20,61 @@ test("service health endpoint responds with bootstrap status", async () => {
   assert.equal(payload.firebaseConfigured, false);
   assert.deepEqual(payload.startupWarnings, ["demo_credentials", "ephemeral_persistence"]);
   assert.equal(typeof payload.startedAt, "string");
+});
+
+test("service info endpoint responds with demoable prototype metadata", async () => {
+  const client = createTestClient();
+  const response = await client.request("/v1/info");
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.productName, "OpenSky");
+  assert.equal(payload.prototypeStage, "demoable-minimal-prototype");
+  assert.equal(payload.browsingMode, "allowlist-based remote browsing / controlled relay");
+  assert.deepEqual(payload.demoPreset, {
+    siteDisplayName: "OpenSky Demo",
+    projectName: "Demo Workspace",
+    verifiedEntryUrl: "https://demo.opensky.local/",
+    verifiedSecondaryUrl: "https://demo.opensky.local/status"
+  });
+  assert.deepEqual(payload.routes, {
+    health: "/health",
+    info: "/info",
+    versionedInfo: "/v1/info"
+  });
+  assert.ok(Array.isArray(payload.demoConstraints));
+  assert.ok(Array.isArray(payload.primaryActions));
+});
+
+test("v1 health alias matches the health payload shape", async () => {
+  const client = createTestClient();
+  const response = await client.request("/v1/health");
+  const payload = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.service, "opensky");
+  assert.equal(payload.mode, "ready");
+});
+
+test("root and info endpoints provide clear demo status without auth", async () => {
+  const client = createTestClient();
+
+  const rootResponse = await client.request("/");
+  const rootPayload = await rootResponse.json();
+  assert.equal(rootResponse.status, 200);
+  assert.equal(rootPayload.summary, "OpenSky backend is running.");
+  assert.equal(rootPayload.infoPath, "/info");
+  assert.equal(rootPayload.healthPath, "/health");
+
+  const infoResponse = await client.request("/info");
+  const infoPayload = await infoResponse.json();
+  assert.equal(infoResponse.status, 200);
+  assert.equal(infoPayload.productName, "OpenSky");
+  assert.equal(infoPayload.routes.info, "/info");
+  assert.equal(infoPayload.routes.versionedInfo, "/v1/info");
+  assert.match(infoPayload.demoNotes.join(" "), /hostname-only base domains/i);
 });
 
 test("production health diagnostics report file-backed persistence without startup warnings", async (t) => {

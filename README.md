@@ -112,6 +112,80 @@ OpenSky 的長期 UX 方向可以描述為：
 
 ## Local Development
 
+### 5-Minute Demo Flow
+
+如果你只是想確認 OpenSky demo prototype 有正常啟動，先照這個最短流程走：
+
+1. 啟 backend
+
+```powershell
+npm run start:service
+```
+
+2. 開另一個 terminal 啟 frontend
+
+```powershell
+npm run dev:web
+```
+
+3. 打開瀏覽器
+
+- `http://localhost:4173`
+- `http://localhost:8787/health`
+- `http://localhost:8787/v1/info`
+
+4. 用 demo 帳號登入
+
+- username: `owner-admin`
+- password: `opensky-demo`
+
+5. 建立一筆最簡單的白名單網站
+
+- `網站名稱`: `Demo`
+- `base domain`: `example.com`
+- `path rule`: `/`
+
+6. 建立一個 project
+
+- `專案名稱`: `Demo`
+
+7. 點 `開啟` 或 `開啟已選網站`
+
+預期結果：
+
+- backend 持續存活，沒有 crash
+- `/health` 與 `/v1/info` 都能回應 JSON
+- frontend 不應顯示 `Backend unavailable`
+- 可以建立 site / project
+- 可以開出受控 tab
+- 中央內容區至少會進入 proxy 文件視圖，而不是停在空白初始狀態
+
+如果你只是要驗證「本機流程是否有跑起來」，先完成上面這 7 步，再去測較複雜的網站。
+
+### Verified Built-in Demo Preset
+
+現在系統在開發 / 測試環境下，若資料庫是空的，會自動 seed 一組我已驗證可正常呈現的 preset：
+
+- `site`: `OpenSky Demo`
+- `project`: `Demo Workspace`
+- `verified entry URL`: `https://demo.opensky.local/`
+- `verified secondary URL`: `https://demo.opensky.local/status`
+
+這組 preset 的特性：
+
+- 不依賴外網
+- 不依賴第三方網站
+- 由 backend 內建 demo origin 提供內容
+- 可完整經過目前的 controlled relay 顯示
+
+所以在全新狀態下，你登入後應該可以直接：
+
+1. 看見 `OpenSky Demo`
+2. 看見 `Demo Workspace`
+3. 直接按 `開啟已選網站`
+
+如果你要先驗證系統本身，而不是驗證外站相容性，請優先用這組 preset。
+
 ### Prerequisites
 
 - Git
@@ -241,6 +315,27 @@ npm run build
 - session vault
 - file transfer preview -> approve -> complete
 
+### 本機啟動順序
+
+目前最穩定的本機開發順序是：
+
+1. `npm run start:service`
+2. `npm run dev:web`
+3. 打開 `http://localhost:4173`
+
+不要反過來先依賴 frontend 去猜 backend 是否存在。
+
+若看到：
+
+- `Backend unavailable`
+- `Failed to fetch`
+
+先檢查：
+
+1. backend terminal 還在不在
+2. `http://localhost:8787/health` 是否打得開
+3. frontend terminal 是否顯示 `Backend API configured via OPEN_SKY_API_BASE=http://localhost:8787`
+
 ### VSCode Debug: 測試受控 browse flow 是否正常
 
 如果你想在本機用 VSCode debug「proxy 功能是否正常」，請先用產品真實邊界來理解：
@@ -347,6 +442,112 @@ node scripts/test.mjs
 - blocked redirects
 - preview-before-approve
 - session / layout restoration
+
+## 白名單網站欄位說明
+
+目前 UI 已把站台建立表單簡化成最小必要欄位，只保留：
+
+1. `網站名稱`
+2. `base domain`
+3. `path rule`
+
+建立站台時，以下能力目前固定預設為啟用，不需要另外勾選：
+
+- session memory
+- upload
+- download
+
+### 1. 網站名稱
+
+用途：
+
+- 給你自己辨識這個白名單站台
+- 顯示在左側站台清單與工作區狀態列
+
+建議填法：
+
+- `Google`
+- `Mega`
+- `內部報表`
+
+### 2. base domain
+
+用途：
+
+- 定義這個站台允許的主網域
+- allowlist 驗證會以這個 hostname 為基礎判斷
+
+這個欄位現在支援：
+
+- 單一網域
+- 多個網域，以逗號分隔
+
+用途：
+
+- 第一個網域會當作主要開站網域
+- 其餘網域可用來涵蓋同站台代理時需要的資產網域
+
+這個欄位應該填 hostname；若有多個，就用逗號分隔。
+
+正確：
+
+- `google.com`
+- `www.google.com`
+- `www.megaholdings.com.tw`
+- `google.com, www.google.com`
+- `www.megaholdings.com.tw, static.megaholdings.com.tw`
+
+錯誤：
+
+- `https://google.com`
+- `https://www.megaholdings.com.tw/`
+- `https://www.megaholdings.com.tw/news/list`
+
+補充：
+
+- 現在前端已加防呆，如果你貼了完整 URL，系統會盡量自動抽出 hostname
+- 若你需要讓頁面上的 CSS / 圖片 / 字型也更完整顯示，請把資產網域也一起放進同一筆 site 的 `base domain`
+- 最穩定的填法仍然是直接填純網域，必要時用逗號分隔多個網域
+
+### 3. path rule
+
+用途：
+
+- 限制這個站台允許開啟的路徑範圍
+- `browse/open` 與 `browse/navigate` 都會檢查這個 path 規則
+
+正確：
+
+- `/`
+- `/team`
+- `/news/list`
+
+說明：
+
+- `/` 代表允許該網域底下的根路徑開始導頁
+- `/team` 代表只允許 `/team` 底下的頁面
+
+### Mega 測試範例
+
+如果你要測：
+
+- `https://www.megaholdings.com.tw/`
+
+建議白名單填法：
+
+- `網站名稱`: `Mega`
+- `base domain`: `www.megaholdings.com.tw`
+- `path rule`: `/`
+
+如果網站會自動導到別的 host，例如：
+
+- `megaholdings.com.tw -> www.megaholdings.com.tw`
+
+那 redirect 後的 host 也必須在 allowlist 內，否則還是會被擋。
+
+更穩妥的填法可以是：
+
+- `base domain`: `megaholdings.com.tw, www.megaholdings.com.tw`
 
 ## Environment Variables
 

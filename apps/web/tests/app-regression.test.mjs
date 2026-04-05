@@ -37,7 +37,25 @@ function createFetchMock(routeMap) {
     const method = init.method ?? "GET";
     const key = `${method} ${parsedUrl.pathname}${parsedUrl.search}`;
     const fallbackKey = `${method} ${parsedUrl.pathname}`;
-    const handler = routeMap.get(key) ?? routeMap.get(fallbackKey);
+    const handler = routeMap.get(key)
+      ?? routeMap.get(fallbackKey)
+      ?? (method === "GET" && parsedUrl.pathname === "/v1/info"
+        ? {
+            ok: true,
+            service: "opensky",
+            mode: "ready",
+            environment: "development",
+            persistenceMode: "memory",
+            productName: "OpenSky",
+            prototypeStage: "demoable-minimal-prototype",
+            browsingMode: "allowlist-based remote browsing / controlled relay",
+            primaryActions: ["Select site", "Open", "Maximize", "Back to workspace"],
+            routes: {
+              health: "/health",
+              info: "/v1/info"
+            }
+          }
+        : null);
 
     if (!handler) {
       throw new Error(`Unexpected request: ${key}`);

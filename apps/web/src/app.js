@@ -1,6 +1,6 @@
 import { createBannerMarkup } from "./components/banner.js";
 import { fetchAuditLog } from "./features/audit/api.js";
-import { fetchSession, submitSignIn, submitSignOut } from "./features/auth/api.js";
+import { fetchServiceInfo, fetchSession, submitSignIn, submitSignOut } from "./features/auth/api.js";
 import { createSignInMarkup } from "./features/auth/view.js";
 import { browseClose, browseNavigate, browseOpen, createBrowseResourceUrl, fetchBrowseContent } from "./features/browse/api.js";
 import { approveTransfer, completeTransfer, createTransfer, previewTransfer } from "./features/file-transfer/api.js";
@@ -30,6 +30,7 @@ import {
   fetchTabs,
   saveLayoutPreference
 } from "./features/workspace/api.js";
+import { normalizeSiteDraft } from "./features/workspace/site-input.js";
 import { clearWorkspaceUiState, loadWorkspaceUiState, saveWorkspaceUiState } from "./features/workspace/storage.js";
 import { createWorkspaceShellMarkup } from "./features/workspace/view.js";
 import { escapeHtml } from "./components/ui.js";
@@ -51,6 +52,8 @@ function createInitialState() {
   const workspaceUiState = loadWorkspaceUiState();
   return {
     locale,
+    serviceStatus: "loading",
+    serviceInfo: null,
     sessionStatus: "loading",
     session: null,
     layout: mergeLayoutState(createDefaultLayoutState(), loadLayoutState() ?? {}),
@@ -114,6 +117,41 @@ function pushBanner(store, banner) {
 
 function getTranslator(store) {
   return createTranslator(store.getState().locale);
+}
+
+function createServiceInfoMarkup(state) {
+  const t = createTranslator(state.locale);
+
+  if (state.serviceStatus === "ready" && state.serviceInfo) {
+    return `
+      <section class="service-status-card service-status-card--ready">
+        <p class="eyebrow">${t("service.eyebrow")}</p>
+        <strong>${t("service.readyTitle")}</strong>
+        <p>${t("service.readyMessage", {
+          environment: state.serviceInfo.environment,
+          persistence: state.serviceInfo.persistenceMode
+        })}</p>
+      </section>
+    `;
+  }
+
+  if (state.serviceStatus === "unavailable") {
+    return `
+      <section class="service-status-card service-status-card--warning">
+        <p class="eyebrow">${t("service.eyebrow")}</p>
+        <strong>${t("service.unavailableTitle")}</strong>
+        <p>${t("service.unavailableMessage")}</p>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="service-status-card service-status-card--loading">
+      <p class="eyebrow">${t("service.eyebrow")}</p>
+      <strong>${t("service.loadingTitle")}</strong>
+      <p>${t("service.loadingMessage")}</p>
+    </section>
+  `;
 }
 
 function setLocaleOnDocument(documentRef, locale) {
@@ -444,7 +482,9 @@ function renderApp(state) {
         transferItemId: state.transferItemId,
         lastTransfer: state.lastTransfer,
         statusMessage: state.statusMessage,
-        activeDocument: state.activeDocument
+        activeDocument: state.activeDocument,
+        serviceInfo: state.serviceInfo,
+        serviceStatus: state.serviceStatus
       }
     });
   }
@@ -453,8 +493,27 @@ function renderApp(state) {
     locale: state.locale,
     bannerMarkup: createBannerMarkup(state.banners, state.locale),
     statusMessage: state.statusMessage,
-    loading: state.sessionStatus === "loading"
+    loading: state.sessionStatus === "loading",
+    serviceInfoMarkup: createServiceInfoMarkup(state)
   });
+}
+
+async function refreshServiceInfo(store) {
+  try {
+    const serviceInfo = await fetchServiceInfo();
+    store.setState((state) => ({
+      ...state,
+      serviceStatus: "ready",
+      serviceInfo
+    }));
+  } catch (error) {
+    logFrontendIssue("service-info", error);
+    store.setState((state) => ({
+      ...state,
+      serviceStatus: "unavailable",
+      serviceInfo: null
+    }));
+  }
 }
 
 async function refreshSession(store) {
@@ -564,6 +623,18 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "toggle-settings-tray") {
+      store.setState((state) => ({
+        ...state,
+        layout: {
+          ...state.layout,
+          topBarState: state.layout.topBarState === "expanded" ? "hidden" : "expanded"
+        }
+      }));
+      await persistLayoutPreference(store);
+      return;
+    }
+
     if (action === "sign-out") {
       await submitSignOut();
       store.setState((state) => ({
@@ -627,6 +698,18 @@ async function handleAction(store, action, targetElement, documentRef) {
         layout: reduceLayoutState(state.layout, {
           type: "set-view-mode",
           viewMode: nextViewMode
+        })
+      }));
+      await persistLayoutPreference(store);
+      return;
+    }
+
+    if (action === "maximize-workspace") {
+      store.setState((state) => ({
+        ...state,
+        layout: reduceLayoutState(state.layout, {
+          type: "set-view-mode",
+          viewMode: "maximized"
         })
       }));
       await persistLayoutPreference(store);
@@ -715,6 +798,17 @@ async function handleAction(store, action, targetElement, documentRef) {
 
     if (action === "refresh-workspace") {
       await refreshWorkspaceData(store);
+      return;
+    }
+
+    if (action === "back-to-workspace") {
+      store.setState((state) => ({
+        ...state,
+        activeTabId: null,
+        currentUrl: "",
+        activeDocument: null,
+        statusMessage: t("status.workspaceOverview")
+      }));
       return;
     }
 
@@ -912,6 +1006,7 @@ export function bootApplication(documentRef = globalThis.document) {
 
   store.subscribe(render);
   render();
+  refreshServiceInfo(store);
   refreshSession(store);
 
   mountNode.addEventListener("submit", async (event) => {
@@ -930,25 +1025,43 @@ export function bootApplication(documentRef = globalThis.document) {
     event.preventDefault();
     const formData = new FormData(workspaceForm);
     const state = store.getState();
+    let nextProjectId = state.activeProjectId;
+    let nextSiteId = state.activeSiteId;
 
     try {
       if (workspaceForm.dataset.form === "create-site") {
-        await createSite({
-          displayName: String(formData.get("displayName") ?? ""),
-          baseDomains: [String(formData.get("baseDomain") ?? "")],
-          pathRules: [String(formData.get("pathRule") ?? "/")],
-          loginPersistenceAllowed: formData.get("loginPersistenceAllowed") !== null,
-          uploadAllowed: formData.get("uploadAllowed") !== null,
-          downloadAllowed: formData.get("downloadAllowed") !== null
+        const normalizedSite = normalizeSiteDraft({
+          displayName: formData.get("displayName"),
+          baseDomain: formData.get("baseDomain"),
+          pathRule: formData.get("pathRule")
         });
+        const createdSite = await createSite({
+          ...normalizedSite.payload,
+          loginPersistenceAllowed: true,
+          uploadAllowed: true,
+          downloadAllowed: true
+        });
+        nextSiteId = createdSite.siteId ?? nextSiteId;
+        if (normalizedSite.normalizedFromUrl) {
+          pushBanner(store, {
+            id: crypto.randomUUID(),
+            tone: "warning",
+            title: t("workspace.siteInputNormalizedTitle"),
+            message: t("workspace.siteInputNormalizedMessage", {
+              domain: normalizedSite.normalizedBaseDomains.join(", "),
+              path: normalizedSite.normalizedPathRule
+            })
+          });
+        }
       }
 
       if (workspaceForm.dataset.form === "create-project") {
-        await createProject({
+        const createdProject = await createProject({
           name: String(formData.get("name") ?? ""),
           description: String(formData.get("description") ?? ""),
           defaultSiteId: state.activeSiteId
         });
+        nextProjectId = createdProject.projectId ?? nextProjectId;
       }
 
       if (workspaceForm.dataset.form === "create-bookmark" && state.activeSiteId) {
@@ -999,7 +1112,13 @@ export function bootApplication(documentRef = globalThis.document) {
         }
       }
 
-      await refreshWorkspaceData(store, state.activeProjectId);
+      await refreshWorkspaceData(store, nextProjectId);
+      if (nextSiteId && nextSiteId !== store.getState().activeSiteId) {
+        store.setState((currentState) => ({
+          ...currentState,
+          activeSiteId: nextSiteId
+        }));
+      }
     } catch (error) {
       logFrontendIssue(`submit:${workspaceForm.dataset.form}`, error, {
         activeProjectId: state.activeProjectId,

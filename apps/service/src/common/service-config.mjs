@@ -23,6 +23,20 @@ function parseAllowedOrigins(value) {
     .filter(Boolean);
 }
 
+function parseBooleanFlag(value, fallback) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
 export function createServiceConfig(env = process.env) {
   const environment = normalizeEnvironment(env.OPEN_SKY_ENV);
   const ownerUsername = String(env.OPEN_SKY_OWNER_USERNAME ?? DEFAULT_OWNER_USERNAME).trim();
@@ -40,6 +54,10 @@ export function createServiceConfig(env = process.env) {
   const firebaseConfigured = Boolean(firebaseProjectId && firebaseClientEmail && firebasePrivateKey);
   const firebasePartiallyConfigured = !firebaseConfigured && Boolean(firebaseProjectId || firebaseClientEmail || firebasePrivateKey);
   const persistenceMode = firebaseConfigured ? "firestore" : persistPath ? "file" : "memory";
+  const demoPresetEnabled = parseBooleanFlag(
+    env.OPEN_SKY_ENABLE_DEMO_PRESET,
+    environment !== "production" && persistenceMode !== "firestore"
+  );
   const startupWarnings = [];
 
   if (firebasePartiallyConfigured) {
@@ -72,6 +90,7 @@ export function createServiceConfig(env = process.env) {
     logPath,
     allowedOrigins,
     persistenceMode,
+    demoPresetEnabled,
     startupWarnings,
     firebase: {
       configured: firebaseConfigured,
@@ -91,6 +110,7 @@ export function createRuntimeDiagnostics(config, startedAt = toIsoTimestamp()) {
     persistenceMode: config.persistenceMode,
     persistPathConfigured: config.persistenceMode === "file",
     firebaseConfigured: config.persistenceMode === "firestore",
+    demoPresetEnabled: config.demoPresetEnabled,
     logPath: config.logPath,
     startupWarnings: [...config.startupWarnings]
   };

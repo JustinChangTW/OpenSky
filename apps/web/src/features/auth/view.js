@@ -1,6 +1,6 @@
 import { createLocaleSwitcherMarkup, createTranslator, normalizeLocale } from "../../i18n-runtime.js";
 
-export function createSignInMarkup({ bannerMarkup, statusMessage, loading, locale = "en" }) {
+export function createSignInMarkup({ bannerMarkup, statusMessage, loading, locale = "en", serviceInfoMarkup = "" }) {
   const resolvedLocale = normalizeLocale(locale);
   const t = createTranslator(resolvedLocale);
 
@@ -15,6 +15,7 @@ export function createSignInMarkup({ bannerMarkup, statusMessage, loading, local
           </p>
           ${createLocaleSwitcherMarkup(resolvedLocale)}
         </header>
+        ${serviceInfoMarkup}
         ${bannerMarkup}
         <form class="auth-form" data-sign-in-form>
           <label class="auth-form__field">

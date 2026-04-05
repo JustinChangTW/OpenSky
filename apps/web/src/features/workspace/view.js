@@ -19,8 +19,40 @@ function normalizeWorkspaceData(input) {
     activeDocument: input?.activeDocument ?? null,
     lastTransfer: input?.lastTransfer ?? null,
     statusMessage: input?.statusMessage ?? "",
-    bottomMessage: input?.bottomMessage ?? ""
+    bottomMessage: input?.bottomMessage ?? "",
+    serviceInfo: input?.serviceInfo ?? null,
+    serviceStatus: input?.serviceStatus ?? "loading"
   };
+}
+
+function createServiceStatusMarkup(data, t) {
+  if (data.serviceStatus === "ready" && data.serviceInfo) {
+    return `
+      <div class="workspace-health workspace-health--ready">
+        <strong>${t("service.readyTitle")}</strong>
+        <span>${t("service.readyMessage", {
+          environment: data.serviceInfo.environment,
+          persistence: data.serviceInfo.persistenceMode
+        })}</span>
+      </div>
+    `;
+  }
+
+  if (data.serviceStatus === "unavailable") {
+    return `
+      <div class="workspace-health workspace-health--warning">
+        <strong>${t("service.unavailableTitle")}</strong>
+        <span>${t("service.unavailableMessage")}</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="workspace-health workspace-health--loading">
+      <strong>${t("service.loadingTitle")}</strong>
+      <span>${t("service.loadingMessage")}</span>
+    </div>
+  `;
 }
 
 function renderSiteList(data, t) {
@@ -43,13 +75,68 @@ function renderSiteList(data, t) {
       <ul class="data-list">${items}</ul>
       <form class="mini-form" data-form="create-site">
         <input name="displayName" type="text" placeholder="${t("workspace.siteName")}" required />
-        <input name="baseDomain" type="text" placeholder="example.com" required />
+        <input name="baseDomain" type="text" placeholder="example.com, static.example.com" required />
+        <p class="panel-meta">${t("workspace.baseDomainHint")}</p>
         <input name="pathRule" type="text" placeholder="/team" required />
-        <label><input name="loginPersistenceAllowed" type="checkbox" checked /> ${t("workspace.sessionShort")}</label>
-        <label><input name="uploadAllowed" type="checkbox" checked /> ${t("workspace.uploadShort")}</label>
-        <label><input name="downloadAllowed" type="checkbox" checked /> ${t("workspace.downloadShort")}</label>
+        <p class="panel-meta">${t("workspace.pathRuleHint")}</p>
+        <p class="panel-meta">${t("workspace.siteDefaultsHint")}</p>
         <button type="submit" class="primary-button">${t("workspace.addSite")}</button>
       </form>
+    </section>
+  `;
+}
+
+function createPrimaryWorkflowMarkup(data, t) {
+  const hasSites = data.sites.length > 0;
+  const hasProjects = data.projects.length > 0;
+  const hasActiveSite = Boolean(data.activeSiteId && data.activeSite);
+  const hasActiveProject = Boolean(data.activeProjectId && data.activeProject);
+  const hasActiveTab = Boolean(data.activeTabId && data.tabs.some((tab) => tab.tabId === data.activeTabId));
+
+  let title = t("workspace.workflowNeedSiteTitle");
+  let message = t("workspace.workflowNeedSiteMessage");
+  let action = "";
+
+  if (hasSites && !hasActiveSite) {
+    title = t("workspace.workflowPickSiteTitle");
+    message = t("workspace.workflowPickSiteMessage");
+  } else if (hasActiveSite && !hasProjects) {
+    title = t("workspace.workflowNeedProjectTitle");
+    message = t("workspace.workflowNeedProjectMessage");
+  } else if (hasProjects && !hasActiveProject) {
+    title = t("workspace.workflowPickProjectTitle");
+    message = t("workspace.workflowPickProjectMessage");
+  } else if (hasActiveSite && hasActiveProject && !hasActiveTab) {
+    title = t("workspace.workflowOpenSiteTitle");
+    message = t("workspace.workflowOpenSiteMessage", {
+      site: data.activeSite?.displayName ?? t("workspace.none"),
+      project: data.activeProject?.name ?? t("workspace.none")
+    });
+    action = `<button type="button" class="primary-button" data-action="open-site" data-site-id="${data.activeSite.siteId}">${t("workspace.openSelectedSite")}</button>`;
+  } else if (hasActiveTab) {
+    title = t("workspace.workflowTabReadyTitle");
+    message = t("workspace.workflowTabReadyMessage");
+  }
+
+  return `
+    <section class="workspace-workflow">
+      <div>
+        <p class="eyebrow">${t("workspace.quickStartEyebrow")}</p>
+        <h2>${t("workspace.quickStartTitle")}</h2>
+      </div>
+      ${createServiceStatusMarkup(data, t)}
+      <div class="workspace-workflow__summary">
+        <span>${t("workspace.siteLabel")}: ${escapeHtml(data.activeSite?.displayName ?? t("workspace.none"))}</span>
+        <span>${t("workspace.projectLabel")}: ${escapeHtml(data.activeProject?.name ?? t("workspace.none"))}</span>
+        <span>${t("workspace.currentTabLabel")}: ${escapeHtml(data.tabs.find((tab) => tab.tabId === data.activeTabId)?.pageTitle ?? t("workspace.noActiveTab"))}</span>
+      </div>
+      <div class="workspace-workflow__callout">
+        <div>
+          <strong>${title}</strong>
+          <p>${message}</p>
+        </div>
+        <div class="stack-actions">${action}</div>
+      </div>
     </section>
   `;
 }
@@ -108,7 +195,8 @@ function createSettingsPaneMarkup(side, state, data, t, locale) {
   const inner = side === "left"
     ? `${renderSiteList(data, t)}${renderProjectList(data, t, locale)}`
     : `
-      <section class="panel-section">
+      <details class="panel-section panel-section--advanced">
+        <summary class="panel-section__summary-toggle">${t("workspace.bookmarks")}</summary>
         <p class="eyebrow">${t("workspace.bookmarks")}</p>
         <ul class="data-list">
           ${data.bookmarks.length ? data.bookmarks.map((bookmark) => `
@@ -126,8 +214,9 @@ function createSettingsPaneMarkup(side, state, data, t, locale) {
           <textarea name="note" placeholder="${t("workspace.optionalNote")}"></textarea>
           <button type="submit" class="primary-button">${t("workspace.saveBookmark")}</button>
         </form>
-      </section>
-      <section class="panel-section">
+      </details>
+      <details class="panel-section panel-section--advanced">
+        <summary class="panel-section__summary-toggle">${t("workspace.notes")}</summary>
         <p class="eyebrow">${t("workspace.notes")}</p>
         <ul class="data-list">
           ${data.notes.length ? data.notes.map((note) => `
@@ -144,8 +233,9 @@ function createSettingsPaneMarkup(side, state, data, t, locale) {
           <textarea name="content" placeholder="${t("workspace.noteContent")}"></textarea>
           <button type="submit" class="primary-button">${t("workspace.saveNote")}</button>
         </form>
-      </section>
-      <section class="panel-section">
+      </details>
+      <details class="panel-section panel-section--advanced">
+        <summary class="panel-section__summary-toggle">${t("workspace.sessionVault")}</summary>
         <p class="eyebrow">${t("workspace.sessionVault")}</p>
         <ul class="data-list">
           ${data.sessionVault.length ? data.sessionVault.map((vault) => `
@@ -159,8 +249,9 @@ function createSettingsPaneMarkup(side, state, data, t, locale) {
           `).join("") : `<li class="empty-state">${t("workspace.noSessions")}</li>`}
         </ul>
         <button type="button" class="ghost-button" data-action="create-vault">${t("workspace.rememberSelectedSite")}</button>
-      </section>
-      <section class="panel-section">
+      </details>
+      <details class="panel-section panel-section--advanced">
+        <summary class="panel-section__summary-toggle">${t("workspace.fileTransfer")}</summary>
         <p class="eyebrow">${t("workspace.fileTransfer")}</p>
         <form class="mini-form" data-form="create-transfer">
           <input name="originalName" type="text" placeholder="memo.txt" required />
@@ -176,8 +267,9 @@ function createSettingsPaneMarkup(side, state, data, t, locale) {
           </div>
           <p class="panel-meta">${escapeHtml(data.lastTransfer.originalName)} - ${escapeHtml(translateEnumValue(data.lastTransfer.transferStatus ?? "pending", locale))}</p>
         ` : `<p class="empty-state">${t("workspace.createTransferPrompt")}</p>`}
-      </section>
-      <section class="panel-section">
+      </details>
+      <details class="panel-section panel-section--advanced">
+        <summary class="panel-section__summary-toggle">${t("workspace.audit")}</summary>
         <p class="eyebrow">${t("workspace.audit")}</p>
         <ul class="data-list data-list--compact">
           ${data.audit.length ? data.audit.slice(0, 8).map((event) => `
@@ -189,7 +281,7 @@ function createSettingsPaneMarkup(side, state, data, t, locale) {
             </li>
           `).join("") : `<li class="empty-state">${t("workspace.noAudit")}</li>`}
         </ul>
-      </section>
+      </details>
     `;
 
   return `
@@ -232,22 +324,19 @@ function createContentStage(layout, data, t, locale) {
         </div>
         <div class="toolbar">
           ${createLocaleSwitcherMarkup(locale)}
-          <button type="button" class="ghost-button" data-action="set-view-mode" data-view-mode="standard">${t("workspace.standard")}</button>
-          <button type="button" class="ghost-button" data-action="set-view-mode" data-view-mode="maximized">${t("workspace.maximized")}</button>
+          <button type="button" class="ghost-button" data-action="toggle-settings-tray">${t("workspace.settingsToggle")}</button>
+          <button type="button" class="ghost-button" data-action="maximize-workspace">${t("workspace.maximizeAction")}</button>
+          <button type="button" class="ghost-button" data-action="back-to-workspace">${t("workspace.backToWorkspace")}</button>
           <button type="button" class="ghost-button" data-action="enter-fullscreen">${t("workspace.fullscreen")}</button>
-          <button type="button" class="ghost-button" data-action="toggle-focus">${t("workspace.focus")}</button>
-          <button type="button" class="ghost-button" data-action="toggle-top-bar">${t("workspace.topBar")}</button>
           <button type="button" class="ghost-button" data-action="sign-out">${t("workspace.signOut")}</button>
         </div>
       </header>
+      ${createPrimaryWorkflowMarkup(data, t)}
       <section class="content-controls">
         <div class="panel-meta-group">
           <span>${t("workspace.projectLabel")}: ${escapeHtml(data.activeProject?.name ?? t("workspace.none"))}</span>
           <span>${t("workspace.siteLabel")}: ${escapeHtml(data.activeSite?.displayName ?? t("workspace.none"))}</span>
-          <span>${t("workspace.viewLabel")}: ${escapeHtml(translateEnumValue(layout.viewMode, locale))}</span>
-          <span>${t("workspace.focusLabel")}: ${escapeHtml(translateEnumValue(layout.focusMode, locale))}</span>
-          <span>${t("workspace.topBarLabel")}: ${escapeHtml(translateEnumValue(layout.topBarState, locale))}</span>
-          <span>${t("workspace.bottomBarLabel")}: ${escapeHtml(translateEnumValue(layout.bottomBarState, locale))}</span>
+          <span>${t("workspace.currentTabLabel")}: ${escapeHtml(activeTab?.pageTitle ?? t("workspace.noActiveTab"))}</span>
         </div>
         <div class="stack-actions">
           ${data.activeSite && data.activeProject ? `<button type="button" class="primary-button" data-action="open-site" data-site-id="${data.activeSite.siteId}">${t("workspace.openSelectedSite")}</button>` : ""}
@@ -284,7 +373,7 @@ function createContentStage(layout, data, t, locale) {
               <div class="content-stage__document-shell">
                 <div class="content-stage__document-meta">
                   <span>${escapeHtml(data.activeDocument?.finalUrl ?? activeTab.currentUrl)}</span>
-                  <span>${escapeHtml(t("workspace.proxyPhase1Label"))}</span>
+                  <span>${escapeHtml(t("workspace.controlledPageLabel"))}</span>
                 </div>
                 ${data.activeDocument?.errorMessage ? `
                   <div class="content-stage__document-error">
@@ -326,6 +415,10 @@ function createSettingsTray(layout, data, t, locale) {
   const leftState = layout.leftPanelState === "expanded" && shellState === "expanded" ? "expanded" : layout.leftPanelState === "hidden" ? "hidden" : "collapsed";
   const rightState = layout.rightPanelState === "expanded" && shellState === "expanded" ? "expanded" : layout.rightPanelState === "hidden" ? "hidden" : "collapsed";
 
+  if (layout.topBarState !== "expanded" && leftState === "hidden" && rightState === "hidden") {
+    return "";
+  }
+
   return `
     <section class="workspace-settings workspace-settings--${layout.topBarState}">
       <div class="workspace-settings__header">
@@ -334,10 +427,8 @@ function createSettingsTray(layout, data, t, locale) {
           <h2>${t("workspace.settingsTitle")}</h2>
         </div>
         <div class="toolbar">
-          ${createLocaleSwitcherMarkup(locale)}
           <button type="button" class="ghost-button" data-action="toggle-left-panel">${t("workspace.leftPanel")}</button>
           <button type="button" class="ghost-button" data-action="toggle-right-panel">${t("workspace.rightPanel")}</button>
-          <button type="button" class="ghost-button" data-action="toggle-top-bar">${t("workspace.settingsToggle")}</button>
         </div>
       </div>
       <div class="workspace-settings__grid workspace-settings__grid--${shellState}">
@@ -362,8 +453,7 @@ export function createWorkspaceShellMarkup({ layout, session, statusMessage, ban
             <h1>${escapeHtml(session.displayName)}</h1>
           </div>
           <div class="workspace-header__actions">
-            <button type="button" class="ghost-button" data-action="toggle-top-bar">${t("workspace.settingsToggle")}</button>
-            <button type="button" class="ghost-button" data-action="toggle-bottom-bar">${t("workspace.bottomBar")}</button>
+            <button type="button" class="ghost-button" data-action="toggle-settings-tray">${t("workspace.settingsToggle")}</button>
           </div>
         </header>
         ${createSettingsTray(layout, workspace, t, resolvedLocale)}
