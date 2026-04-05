@@ -1,0 +1,10 @@
+{
+  "name": "@opensky/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build-web.mjs",
+    "dev": "node ./dev-server.mjs",
+    "start": "node ./dev-server.mjs"
+  }
+}

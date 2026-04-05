@@ -20,3 +20,13 @@ export function browseClose(payload) {
     body: JSON.stringify(payload)
   });
 }
+
+export function fetchBrowseContent(tabId) {
+  return requestJson(`/v1/browse/content?tabId=${encodeURIComponent(tabId)}`, {
+    method: "GET"
+  });
+}
+
+export function createBrowseResourceUrl(tabId, resourceUrl) {
+  return `/v1/browse/resource?tabId=${encodeURIComponent(tabId)}&resourceUrl=${encodeURIComponent(resourceUrl)}`;
+}

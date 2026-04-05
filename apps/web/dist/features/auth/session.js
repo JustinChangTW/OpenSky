@@ -1,3 +1,5 @@
+import { loadLocale } from "../../i18n-runtime.js";
+
 const SESSION_STORAGE_KEY = "opensky.session-token";
 
 function normalizeApiBase(value) {
@@ -35,9 +37,12 @@ export function saveSessionToken(token, storageRef = globalThis.localStorage) {
 
 export async function requestJson(pathname, init = {}) {
   const token = loadSessionToken();
+  const locale = loadLocale();
   const response = await fetch(`${resolveApiBase()}${pathname}`, {
+    credentials: "include",
     headers: {
       "content-type": "application/json",
+      "accept-language": locale,
       "x-opensky-session": token,
       ...(init.headers ?? {})
     },

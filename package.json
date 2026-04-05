@@ -7,10 +7,14 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "lint": "node scripts/lint.mjs",
     "typecheck": "node scripts/typecheck.mjs",
     "test": "node scripts/test.mjs",
     "build": "node scripts/build.mjs",
+    "build:web": "npm run build --workspace @opensky/web",
+    "dev:web": "npm run dev --workspace @opensky/web",
+    "start:web": "npm run start --workspace @opensky/web",
     "start:service": "node apps/service/src/server.mjs"
   }
 }

@@ -11,6 +11,7 @@ export const STORE_COLLECTIONS = Object.freeze([
   "notes",
   "layoutPreferences",
   "sessionVault",
+  "relaySessions",
   "fileTransfers",
   "audit"
 ]);
@@ -24,6 +25,7 @@ function createEmptySnapshot() {
     notes: [],
     layoutPreferences: [],
     sessionVault: [],
+    relaySessions: [],
     fileTransfers: [],
     audit: [],
     counters: []

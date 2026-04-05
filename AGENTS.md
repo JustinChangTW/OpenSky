@@ -40,6 +40,29 @@ OpenSky is:
 - a project-based workspace with persistent state
 - a UI that prioritizes central content over peripheral controls
 
+## 2.1 Long-term Stealth Direction
+
+The preferred long-term UX direction is a more "stealth" or "seamless" workspace feel.
+
+In this repo, that must mean:
+
+- allowlist-only backend relay
+- managed external site session handling on the backend
+- reducing direct browser-to-external-site coupling where feasible
+
+It must not mean:
+
+- turning OpenSky into a general-purpose proxy
+- allowing arbitrary URL relay
+- bypassing site restrictions outside the allowlist model
+- silently masking unsupported site behavior
+
+If implementing work in this area, prefer the phrase:
+
+- `allowlist-only backend relay`
+
+Do not describe it as a generic proxy unless the product boundary is explicitly changed.
+
 Do not implement features that violate this boundary unless the task explicitly redefines the product.
 
 ## 3. Repo Reality
@@ -68,6 +91,12 @@ These are mandatory:
 - fullscreen failures must fall back to `maximized`
 - unsupported behavior must not fail silently
 - no built-in LLM features in MVP
+
+For future relay work:
+
+- only relay allowlisted domains / paths
+- prefer project-tab-scoped relay behavior over open-ended relay endpoints
+- keep unsupported sites explicit
 
 If LLM features are ever added later, all output must stream.
 

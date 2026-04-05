@@ -13,6 +13,22 @@ This skill is for:
 - Render deployment maintenance
 - small feature or bug-fix work that must preserve the controlled web access product boundaries
 
+## Long-term Product Memory
+
+When this repo evolves toward a more "stealth" browsing experience, the intended direction is:
+
+- allowlist-only backend relay
+- backend-managed external session handling
+- reducing direct browser exposure to external origins where feasible
+
+This does not authorize:
+
+- generic proxy behavior
+- arbitrary URL relay
+- bypass-oriented browsing features
+
+Always frame that direction as a controlled relay inside the existing allowlist-only workspace model.
+
 ## Repo Facts To Respect
 
 - Frontend is a static app under `apps/web`
@@ -73,6 +89,7 @@ Any change must preserve:
 - `maximized` default
 - fullscreen fallback
 - preview-before-approve
+- and any "stealth" improvement must remain allowlist-only
 
 ## Firebase / Firestore Adjustments
 

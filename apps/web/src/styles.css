@@ -160,8 +160,7 @@ body {
 
 .workspace-shell {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+  display: block;
 }
 
 .workspace-shell--focus .workspace-status {
@@ -174,7 +173,8 @@ body {
 }
 
 .workspace-header,
-.workspace-topbar {
+.workspace-topbar,
+.workspace-settings__header {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -189,44 +189,52 @@ body {
   flex-wrap: wrap;
 }
 
-.workspace-panel {
-  transition: width 160ms ease, opacity 160ms ease, transform 160ms ease;
-  overflow: hidden;
+.workspace-settings {
+  margin: 16px 0;
+  padding: 16px 18px;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
 }
 
-.workspace-panel--left,
-.workspace-panel--right {
-  border-right: 1px solid rgba(203, 213, 225, 0.6);
-  background: rgba(248, 250, 252, 0.78);
-  backdrop-filter: blur(12px);
+.workspace-settings--hidden {
+  display: none;
 }
 
-.workspace-panel--right {
-  border-right: 0;
-  border-left: 1px solid rgba(203, 213, 225, 0.6);
+.workspace-settings__grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
 }
 
-.workspace-panel--hidden {
-  width: 0;
-  opacity: 0;
+.workspace-settings__grid--expanded {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.workspace-panel--collapsed {
-  width: 84px;
+.workspace-settings__grid--collapsed {
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
 }
 
-.workspace-panel--expanded {
-  width: min(24vw, 320px);
+.workspace-settings__pane {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(203, 213, 225, 0.7);
+  border-radius: 20px;
+  background: rgba(248, 250, 252, 0.75);
 }
 
-.workspace-panel__inner {
-  padding: 18px;
-  width: min(24vw, 320px);
+.workspace-settings__pane--collapsed {
+  display: grid;
+  gap: 10px;
 }
 
-.workspace-shell--maximized .workspace-panel--hidden,
-.workspace-shell--fullscreen .workspace-panel--hidden {
-  width: 0;
+.workspace-settings__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .workspace-topbar--hidden,
@@ -262,7 +270,10 @@ body {
 .panel-section {
   display: grid;
   gap: 12px;
-  margin-bottom: 18px;
+}
+
+.workspace-settings__pane--expanded .panel-section + .panel-section {
+  margin-top: 18px;
 }
 
 .data-list {
@@ -458,11 +469,64 @@ body {
     linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
 }
 
-.content-stage__iframe {
+.content-stage__document-shell {
   width: 100%;
   height: 100%;
-  border: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   background: white;
+}
+
+.content-stage__document-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(203, 213, 225, 0.9);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.content-stage__document {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px;
+  background: white;
+}
+
+.content-stage__document-note {
+  padding: 10px 16px 14px;
+  border-top: 1px solid rgba(203, 213, 225, 0.7);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.content-stage__document-error,
+.content-stage__document-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.content-stage__document-error strong {
+  color: var(--text);
+}
+
+.content-stage__document :is(img, video, canvas, svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+.content-stage__document a[data-proxy-href] {
+  color: var(--primary);
+}
+
+.content-stage__relay-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .content-stage__mock-site {
@@ -474,23 +538,16 @@ body {
   padding: 24px;
 }
 
-.workspace-shell--maximized .workspace-main,
-.workspace-shell--fullscreen .workspace-main {
-  width: min(100%, 100vw);
-}
-
 @media (max-width: 960px) {
-  .workspace-shell {
+  .workspace-settings__grid,
+  .workspace-settings__grid--expanded,
+  .workspace-settings__grid--collapsed {
     grid-template-columns: 1fr;
-  }
-
-  .workspace-panel--left,
-  .workspace-panel--right {
-    display: none;
   }
 
   .workspace-header,
   .workspace-topbar,
+  .workspace-settings__header,
   .content-stage__header,
   .content-controls,
   .workspace-urlbar {

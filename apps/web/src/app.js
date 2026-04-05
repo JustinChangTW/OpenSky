@@ -2,7 +2,7 @@ import { createBannerMarkup } from "./components/banner.js";
 import { fetchAuditLog } from "./features/audit/api.js";
 import { fetchSession, submitSignIn, submitSignOut } from "./features/auth/api.js";
 import { createSignInMarkup } from "./features/auth/view.js";
-import { browseClose, browseNavigate, browseOpen } from "./features/browse/api.js";
+import { browseClose, browseNavigate, browseOpen, createBrowseResourceUrl, fetchBrowseContent } from "./features/browse/api.js";
 import { approveTransfer, completeTransfer, createTransfer, previewTransfer } from "./features/file-transfer/api.js";
 import {
   createDefaultLayoutState,
@@ -16,6 +16,7 @@ import {
 import { requestFullscreenWithFallback } from "./features/layout/fullscreen.js";
 import { loadLayoutState, saveLayoutState } from "./features/layout/storage.js";
 import { createSessionVault, fetchSessionVault, updateSessionVault } from "./features/session-vault/api.js";
+import { createTranslator, describeUiError, loadLocale, saveLocale } from "./i18n-runtime.js";
 import {
   createBookmark,
   createNote,
@@ -29,15 +30,32 @@ import {
   fetchTabs,
   saveLayoutPreference
 } from "./features/workspace/api.js";
+import { clearWorkspaceUiState, loadWorkspaceUiState, saveWorkspaceUiState } from "./features/workspace/storage.js";
 import { createWorkspaceShellMarkup } from "./features/workspace/view.js";
+import { escapeHtml } from "./components/ui.js";
+
+function logFrontendIssue(scope, error, extra = {}) {
+  console.log("OpenSky frontend issue", {
+    scope,
+    message: error?.message ?? String(error),
+    code: error?.payload?.code ?? null,
+    traceId: error?.payload?.traceId ?? null,
+    userAction: error?.payload?.userAction ?? null,
+    extra
+  });
+}
 
 function createInitialState() {
+  const locale = loadLocale();
+  const t = createTranslator(locale);
+  const workspaceUiState = loadWorkspaceUiState();
   return {
+    locale,
     sessionStatus: "loading",
     session: null,
     layout: mergeLayoutState(createDefaultLayoutState(), loadLayoutState() ?? {}),
     banners: [],
-    statusMessage: "Checking current session.",
+    statusMessage: t("status.checkingSession"),
     sites: [],
     projects: [],
     tabs: [],
@@ -45,13 +63,14 @@ function createInitialState() {
     notes: [],
     vaultItems: [],
     auditItems: [],
-    activeProjectId: null,
-    activeSiteId: null,
-    activeTabId: null,
-    currentUrl: "",
+    activeProjectId: workspaceUiState.activeProjectId ?? null,
+    activeSiteId: workspaceUiState.activeSiteId ?? null,
+    activeTabId: workspaceUiState.activeTabId ?? null,
+    currentUrl: workspaceUiState.currentUrl ?? "",
     transferItemId: null,
     activeLayoutPreferenceId: null,
-    lastTransfer: null
+    lastTransfer: null,
+    activeDocument: null
   };
 }
 
@@ -67,6 +86,7 @@ function createStore(initialState) {
       const nextState = typeof updater === "function" ? updater(state) : updater;
       state = nextState;
       saveLayoutState(state.layout);
+      saveWorkspaceUiState(state);
       for (const subscriber of subscribers) {
         subscriber(state);
       }
@@ -92,6 +112,183 @@ function pushBanner(store, banner) {
   }));
 }
 
+function getTranslator(store) {
+  return createTranslator(store.getState().locale);
+}
+
+function setLocaleOnDocument(documentRef, locale) {
+  const root = documentRef?.documentElement ?? documentRef?.querySelector?.("html");
+  if (root) {
+    root.lang = locale;
+  }
+}
+
+function rewriteCssUrls(cssText, baseUrl, tabId) {
+  return String(cssText ?? "")
+    .replace(/url\(([^)]+)\)/giu, (_, value) => {
+      const trimmedValue = String(value ?? "").trim().replace(/^['"]|['"]$/gu, "");
+      if (!trimmedValue || trimmedValue.startsWith("data:") || trimmedValue.startsWith("javascript:")) {
+        return `url("${trimmedValue}")`;
+      }
+
+      try {
+        return `url("${createBrowseResourceUrl(tabId, new URL(trimmedValue, baseUrl).href)}")`;
+      } catch {
+        return `url("${trimmedValue}")`;
+      }
+    })
+    .replace(/@import\s+(?:url\()?["']?([^"')\s]+)["']?\)?/giu, (_, value) => {
+      try {
+        return `@import url("${createBrowseResourceUrl(tabId, new URL(value, baseUrl).href)}")`;
+      } catch {
+        return `@import url("${value}")`;
+      }
+    });
+}
+
+function sanitizeRelayedDocument(activeDocument) {
+  const { documentHtml, finalUrl, requestedUrl, tabId } = activeDocument ?? {};
+  const baseUrl = finalUrl ?? requestedUrl ?? "";
+  if (typeof DOMParser === "undefined") {
+    return {
+      html: `<pre class="content-stage__relay-text">${escapeHtml(documentHtml)}</pre>`,
+      strippedScripts: 0
+    };
+  }
+
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(String(documentHtml ?? ""), "text/html");
+  let strippedScripts = 0;
+
+  parsed.querySelectorAll("script").forEach((node) => {
+    strippedScripts += 1;
+    node.remove();
+  });
+
+  parsed.querySelectorAll("iframe, frame, object, embed, form, input, button, textarea, select, base, meta[http-equiv]").forEach((node) => {
+    node.remove();
+  });
+
+  parsed.querySelectorAll("style").forEach((node) => {
+    node.textContent = rewriteCssUrls(node.textContent ?? "", baseUrl, tabId);
+  });
+
+  parsed.querySelectorAll("*").forEach((element) => {
+    const tagName = element.tagName.toLowerCase();
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value;
+
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        continue;
+      }
+
+      if (name === "src" || name === "href") {
+        if (/^\s*javascript:/iu.test(value)) {
+          element.removeAttribute(attribute.name);
+          continue;
+        }
+
+        try {
+          const absoluteUrl = new URL(value, baseUrl).href;
+          if (tagName === "a" && name === "href") {
+            element.setAttribute("data-proxy-href", absoluteUrl);
+            element.setAttribute(attribute.name, absoluteUrl);
+            continue;
+          }
+
+          if (tagName === "link" && name === "href") {
+            const rel = String(element.getAttribute("rel") ?? "").toLowerCase();
+            if (rel.includes("stylesheet") || rel.includes("icon") || rel.includes("preload")) {
+              element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
+              continue;
+            }
+          }
+
+          if (name === "src") {
+            element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
+            continue;
+          }
+
+          element.setAttribute(attribute.name, absoluteUrl);
+        } catch {
+          element.removeAttribute(attribute.name);
+        }
+      }
+
+      if (name === "srcset") {
+        const rewrittenSrcSet = value
+          .split(",")
+          .map((entry) => {
+            const [candidateUrl, descriptor] = entry.trim().split(/\s+/, 2);
+            if (!candidateUrl) {
+              return "";
+            }
+
+            try {
+              const absoluteUrl = new URL(candidateUrl, baseUrl).href;
+              const proxiedUrl = createBrowseResourceUrl(tabId, absoluteUrl);
+              return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
+            } catch {
+              return entry.trim();
+            }
+          })
+          .filter(Boolean)
+          .join(", ");
+
+        if (rewrittenSrcSet) {
+          element.setAttribute(attribute.name, rewrittenSrcSet);
+        } else {
+          element.removeAttribute(attribute.name);
+        }
+      }
+    }
+
+    if (tagName === "a" && element.hasAttribute("data-proxy-href")) {
+      element.setAttribute("target", "_self");
+      element.setAttribute("rel", "nofollow");
+    }
+  });
+
+  const body = parsed.body ?? parsed.documentElement;
+  return {
+    html: body.innerHTML,
+    strippedScripts
+  };
+}
+
+function hydrateRelayedDocument(documentRef, activeDocument) {
+  const mountNode = documentRef?.querySelector?.("[data-relay-document]");
+  const noteNode = documentRef?.querySelector?.("[data-relay-note]");
+  if (!mountNode) {
+    return;
+  }
+
+  if (!activeDocument?.documentHtml) {
+    mountNode.innerHTML = "";
+    if (noteNode) {
+      noteNode.textContent = "";
+    }
+    return;
+  }
+
+  const sanitized = sanitizeRelayedDocument(activeDocument);
+  mountNode.innerHTML = sanitized.html;
+  if (noteNode) {
+    const t = createTranslator(documentRef?.documentElement?.lang ?? "en");
+    if (Array.isArray(activeDocument?.unsupportedHosts) && activeDocument.unsupportedHosts.length) {
+      noteNode.textContent = t("workspace.proxyAdditionalDomains", {
+        domains: activeDocument.unsupportedHosts.join(", ")
+      });
+    } else {
+      noteNode.textContent = sanitized.strippedScripts > 0
+        ? t("workspace.proxyScriptsDisabled")
+        : t("workspace.proxyResourceMode");
+    }
+  }
+}
+
 function dismissBanner(store, id) {
   store.setState((state) => ({
     ...state,
@@ -115,7 +312,13 @@ async function persistLayoutPreference(store) {
         }));
       }
     })
-    .catch(() => undefined);
+    .catch((error) => {
+      logFrontendIssue("persist-layout-preference", error, {
+        activeProjectId: state.activeProjectId,
+        layoutPreferenceId: state.activeLayoutPreferenceId
+      });
+      return undefined;
+    });
 }
 
 async function refreshWorkspaceData(store, projectId = null) {
@@ -147,6 +350,52 @@ async function refreshWorkspaceData(store, projectId = null) {
   const resolvedLayout = await fetchLayoutPreference(activeProjectId ?? undefined).catch(() => null);
   const activeLayoutPreferenceId = resolvedLayout?.resolvedPreference?.layoutPreferenceId ?? null;
   const nextActiveTab = tabs.find((tab) => tab.tabId === previousState.activeTabId) ?? tabs[0] ?? null;
+  let activeDocument = null;
+  const syncedTabs = [...tabs];
+
+    if (nextActiveTab) {
+      try {
+        activeDocument = await fetchBrowseContent(nextActiveTab.tabId);
+      if (Array.isArray(activeDocument?.unsupportedHosts) && activeDocument.unsupportedHosts.length) {
+        console.log("OpenSky proxy warning", {
+          scope: "browse-content",
+          activeProjectId,
+          activeTabId: nextActiveTab.tabId,
+          unsupportedHosts: activeDocument.unsupportedHosts
+        });
+      }
+      const activeIndex = syncedTabs.findIndex((tab) => tab.tabId === nextActiveTab.tabId);
+      if (activeIndex >= 0) {
+        syncedTabs[activeIndex] = {
+          ...syncedTabs[activeIndex],
+          currentUrl: activeDocument.finalUrl ?? syncedTabs[activeIndex].currentUrl,
+          pageTitle: activeDocument.pageTitle ?? syncedTabs[activeIndex].pageTitle
+        };
+      }
+    } catch (error) {
+      logFrontendIssue("browse-content", error, {
+        activeProjectId,
+        activeTabId: nextActiveTab.tabId
+      });
+      const displayError = describeUiError(error, store.getState().locale);
+      pushBanner(store, {
+        id: crypto.randomUUID(),
+        tone: "warning",
+        title: displayError.title,
+        message: displayError.message
+      });
+        activeDocument = {
+          tabId: nextActiveTab.tabId,
+          requestedUrl: nextActiveTab.currentUrl,
+          finalUrl: nextActiveTab.currentUrl,
+          pageTitle: nextActiveTab.pageTitle,
+          contentType: "text/plain",
+          documentHtml: "",
+          renderMode: "allowlist-proxy-phase1",
+          errorMessage: displayError.message
+        };
+      }
+  }
 
   store.setState((state) => ({
     ...state,
@@ -156,23 +405,25 @@ async function refreshWorkspaceData(store, projectId = null) {
     notes,
     vaultItems,
     auditItems,
-    tabs,
+    tabs: syncedTabs,
     activeProjectId,
     activeSiteId,
     activeTabId: nextActiveTab?.tabId ?? null,
-    currentUrl: nextActiveTab?.currentUrl ?? state.currentUrl,
+    currentUrl: activeDocument?.finalUrl ?? nextActiveTab?.currentUrl ?? state.currentUrl,
     activeLayoutPreferenceId,
-    layout: resolvedLayout?.resolvedPreference ? mergeLayoutState(state.layout, resolvedLayout.resolvedPreference) : state.layout
+    layout: resolvedLayout?.resolvedPreference ? mergeLayoutState(state.layout, resolvedLayout.resolvedPreference) : state.layout,
+    activeDocument
   }));
 }
 
 function renderApp(state) {
   if (state.sessionStatus === "signed_in") {
     return createWorkspaceShellMarkup({
+      locale: state.locale,
       layout: state.layout,
       session: state.session,
       statusMessage: state.statusMessage,
-      bannerMarkup: createBannerMarkup(state.banners),
+      bannerMarkup: createBannerMarkup(state.banners, state.locale),
       workspace: {
         sites: state.sites,
         projects: state.projects,
@@ -192,19 +443,22 @@ function renderApp(state) {
         currentUrl: state.currentUrl,
         transferItemId: state.transferItemId,
         lastTransfer: state.lastTransfer,
-        statusMessage: state.statusMessage
+        statusMessage: state.statusMessage,
+        activeDocument: state.activeDocument
       }
     });
   }
 
   return createSignInMarkup({
-    bannerMarkup: createBannerMarkup(state.banners),
+    locale: state.locale,
+    bannerMarkup: createBannerMarkup(state.banners, state.locale),
     statusMessage: state.statusMessage,
     loading: state.sessionStatus === "loading"
   });
 }
 
 async function refreshSession(store) {
+  const t = getTranslator(store);
   try {
     const session = await fetchSession();
     if (!session?.signedIn) {
@@ -212,7 +466,7 @@ async function refreshSession(store) {
         ...state,
         sessionStatus: "signed_out",
         session: null,
-        statusMessage: "Sign in to open your allowlisted workspace."
+        statusMessage: t("status.signInToOpen")
       }));
       return;
     }
@@ -221,37 +475,40 @@ async function refreshSession(store) {
       ...state,
       sessionStatus: "signed_in",
       session,
-      statusMessage: "Workspace restored."
+      statusMessage: t("status.workspaceRestored")
     }));
     await refreshWorkspaceData(store);
   } catch (error) {
+    logFrontendIssue("refresh-session", error);
     const errorCode = error?.payload?.code;
     if (errorCode === "AUTH_REQUIRED") {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
         session: null,
-        statusMessage: "Sign in to open your allowlisted workspace."
+        statusMessage: t("status.signInToOpen")
       }));
       return;
     }
 
+    const displayError = describeUiError(error, store.getState().locale);
     pushBanner(store, {
       id: crypto.randomUUID(),
       tone: "warning",
-      title: "Backend unavailable",
-      message: error.message
+      title: t("banner.backendUnavailableTitle"),
+      message: displayError.message
     });
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_out",
       session: null,
-      statusMessage: "Backend is warming up or unavailable."
+      statusMessage: t("status.backendUnavailable")
     }));
   }
 }
 
 async function handleSignInSubmit(store, formElement) {
+  const t = getTranslator(store);
   const formData = new FormData(formElement);
   const username = String(formData.get("username") ?? "");
   const password = String(formData.get("password") ?? "");
@@ -259,7 +516,7 @@ async function handleSignInSubmit(store, formElement) {
   store.setState((state) => ({
     ...state,
     sessionStatus: "loading",
-    statusMessage: "Signing in."
+    statusMessage: t("status.signingIn")
   }));
 
   try {
@@ -268,29 +525,42 @@ async function handleSignInSubmit(store, formElement) {
       ...state,
       sessionStatus: "signed_in",
       session,
-      statusMessage: "Signed in."
+      statusMessage: t("status.signedIn")
     }));
     await refreshWorkspaceData(store);
   } catch (error) {
+    logFrontendIssue("sign-in", error, { username });
+    const displayError = describeUiError(error, store.getState().locale);
     pushBanner(store, {
       id: crypto.randomUUID(),
       tone: "danger",
-      title: "Sign-in failed",
-      message: error.message
+      title: t("banner.signInFailedTitle"),
+      message: displayError.message
     });
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_out",
       session: null,
-      statusMessage: "Sign in to continue."
+      statusMessage: t("status.signInToContinue")
     }));
   }
 }
 
 async function handleAction(store, action, targetElement, documentRef) {
+  const t = getTranslator(store);
   try {
     if (action === "dismiss-banner") {
       dismissBanner(store, targetElement.dataset.bannerId);
+      return;
+    }
+
+    if (action === "set-locale") {
+      const nextLocale = saveLocale(targetElement.dataset.locale ?? store.getState().locale);
+      store.setState((state) => ({
+        ...state,
+        locale: nextLocale
+      }));
+      setLocaleOnDocument(documentRef, nextLocale);
       return;
     }
 
@@ -314,8 +584,10 @@ async function handleAction(store, action, targetElement, documentRef) {
         transferItemId: null,
         activeLayoutPreferenceId: null,
         lastTransfer: null,
-        statusMessage: "Signed out."
+        activeDocument: null,
+        statusMessage: t("status.signedOut")
       }));
+      clearWorkspaceUiState();
       return;
     }
 
@@ -366,7 +638,8 @@ async function handleAction(store, action, targetElement, documentRef) {
       const result = await requestFullscreenWithFallback({
         documentRef,
         targetElement: contentStage,
-        layout: store.getState().layout
+        layout: store.getState().layout,
+        locale: store.getState().locale
       });
 
       store.setState((state) => ({
@@ -416,8 +689,8 @@ async function handleAction(store, action, targetElement, documentRef) {
         pushBanner(store, {
           id: crypto.randomUUID(),
           tone: "warning",
-          title: "Missing workspace context",
-          message: "Choose a project and a site before opening a controlled tab."
+          title: t("banner.missingWorkspaceContext"),
+          message: t("banner.missingProjectAndSite")
         });
         return;
       }
@@ -435,7 +708,7 @@ async function handleAction(store, action, targetElement, documentRef) {
         ...currentState,
         activeSiteId: site.siteId,
         currentUrl: entryUrl,
-        statusMessage: "Controlled tab opened."
+        statusMessage: t("status.controlledTabOpened")
       }));
       return;
     }
@@ -453,8 +726,8 @@ async function handleAction(store, action, targetElement, documentRef) {
         pushBanner(store, {
           id: crypto.randomUUID(),
           tone: "warning",
-          title: "Missing workspace context",
-          message: "Choose a project, a site, and an allowlisted URL first."
+          title: t("banner.missingWorkspaceContext"),
+          message: t("banner.missingProjectSiteUrl")
         });
         return;
       }
@@ -477,7 +750,7 @@ async function handleAction(store, action, targetElement, documentRef) {
       store.setState((state) => ({
         ...state,
         currentUrl,
-        statusMessage: action === "browse-open" ? "Controlled tab opened." : "Tab navigated."
+        statusMessage: action === "browse-open" ? t("status.controlledTabOpened") : t("status.tabNavigated")
       }));
       return;
     }
@@ -492,7 +765,7 @@ async function handleAction(store, action, targetElement, documentRef) {
       await refreshWorkspaceData(store, activeProjectId);
       store.setState((state) => ({
         ...state,
-        statusMessage: "Controlled tab closed."
+        statusMessage: t("status.controlledTabClosed")
       }));
       return;
     }
@@ -516,7 +789,7 @@ async function handleAction(store, action, targetElement, documentRef) {
         ...state,
         transferItemId: item.itemId,
         lastTransfer: item,
-        statusMessage: "Transfer created."
+        statusMessage: t("status.transferCreated")
       }));
       return;
     }
@@ -563,19 +836,62 @@ async function handleAction(store, action, targetElement, documentRef) {
         ...state,
         lastTransfer: lastTransfer ?? state.lastTransfer,
         statusMessage: action === "preview-transfer"
-          ? "Preview completed."
+          ? t("status.previewCompleted")
           : action === "approve-transfer"
-            ? "Transfer approved."
-            : "Transfer completed."
+            ? t("status.transferApproved")
+            : t("status.transferCompleted")
       }));
       return;
     }
   } catch (error) {
+    logFrontendIssue(`action:${action}`, error, {
+      activeProjectId: store.getState().activeProjectId,
+      activeSiteId: store.getState().activeSiteId,
+      activeTabId: store.getState().activeTabId
+    });
+    const displayError = describeUiError(error, store.getState().locale);
     pushBanner(store, {
       id: crypto.randomUUID(),
       tone: "danger",
-      title: error?.payload?.code ?? "REQUEST_FAILED",
-      message: error.message
+      title: displayError.title,
+      message: displayError.message
+    });
+  }
+}
+
+async function handleProxyDocumentClick(store, anchorElement) {
+  const nextUrl = String(anchorElement?.dataset?.proxyHref ?? "").trim();
+  const { activeProjectId, activeTabId } = store.getState();
+  const t = getTranslator(store);
+
+  if (!nextUrl || !activeProjectId || !activeTabId) {
+    return;
+  }
+
+  try {
+    await browseNavigate({
+      projectId: activeProjectId,
+      tabId: activeTabId,
+      nextUrl
+    });
+    await refreshWorkspaceData(store, activeProjectId);
+    store.setState((state) => ({
+      ...state,
+      currentUrl: nextUrl,
+      statusMessage: t("status.tabNavigated")
+    }));
+  } catch (error) {
+    logFrontendIssue("proxy-document-click", error, {
+      activeProjectId,
+      activeTabId,
+      nextUrl
+    });
+    const displayError = describeUiError(error, store.getState().locale);
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "danger",
+      title: displayError.title,
+      message: displayError.message
     });
   }
 }
@@ -589,7 +905,9 @@ export function bootApplication(documentRef = globalThis.document) {
   const store = createStore(createInitialState());
 
   function render() {
+    setLocaleOnDocument(documentRef, store.getState().locale);
     mountNode.innerHTML = renderApp(store.getState());
+    hydrateRelayedDocument(documentRef, store.getState().activeDocument);
   }
 
   store.subscribe(render);
@@ -683,16 +1001,29 @@ export function bootApplication(documentRef = globalThis.document) {
 
       await refreshWorkspaceData(store, state.activeProjectId);
     } catch (error) {
+      logFrontendIssue(`submit:${workspaceForm.dataset.form}`, error, {
+        activeProjectId: state.activeProjectId,
+        activeSiteId: state.activeSiteId,
+        activeTabId: state.activeTabId
+      });
+      const displayError = describeUiError(error, store.getState().locale);
       pushBanner(store, {
         id: crypto.randomUUID(),
         tone: "danger",
-        title: error?.payload?.code ?? "REQUEST_FAILED",
-        message: error.message
+        title: displayError.title,
+        message: displayError.message
       });
     }
   });
 
   mountNode.addEventListener("click", async (event) => {
+    const proxyAnchor = event.target.closest("[data-proxy-href]");
+    if (proxyAnchor) {
+      event.preventDefault();
+      await handleProxyDocumentClick(store, proxyAnchor);
+      return;
+    }
+
     const button = event.target.closest("[data-action]");
     if (!button) {
       return;
@@ -700,6 +1031,14 @@ export function bootApplication(documentRef = globalThis.document) {
 
     event.preventDefault();
     await handleAction(store, button.dataset.action, button, documentRef);
+  });
+
+  globalThis.addEventListener?.("error", (event) => {
+    logFrontendIssue("window-error", event?.error ?? event?.message ?? "Unknown window error");
+  });
+
+  globalThis.addEventListener?.("unhandledrejection", (event) => {
+    logFrontendIssue("unhandled-rejection", event?.reason ?? "Unhandled promise rejection");
   });
 }
 

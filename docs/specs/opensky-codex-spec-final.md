@@ -1589,4 +1589,29 @@ Stage 0~6
 - `CLAUDE.md`
 
 並把本文件中的分階段 instructions 分別整理進兩者。
+---
 
+## 24. Long-term Stealth Direction Addendum
+
+OpenSky may evolve toward a more seamless or "stealth-feel" browsing experience, but this direction remains constrained by the core product boundary.
+
+The intended meaning is:
+
+- allowlist-only backend relay
+- backend-managed external site session handling
+- reducing direct browser-to-external-origin coupling where feasible
+- preserving the existing single-user workspace model
+
+This addendum does not authorize:
+
+- generic proxy behavior
+- arbitrary URL relay
+- network restriction bypass behavior
+- silent masking of unsupported sites
+
+If future implementation follows this direction, it must:
+
+- relay only allowlisted domains and allowed paths
+- remain project/tab scoped rather than open-ended
+- preserve explicit unsupported-site signaling
+- keep GitHub Pages as frontend-only and Render as the dynamic enforcement layer

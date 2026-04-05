@@ -2,14 +2,18 @@ import { randomUUID } from "node:crypto";
 import { createAuditEvent } from "../../../../packages/contracts/src/audit/index.mjs";
 import { LAYOUT_PREFERENCE_PRECEDENCE, toIsoTimestamp } from "../../../../packages/contracts/src/common/index.mjs";
 import { createErrorResponse, ERROR_CODES } from "../../../../packages/contracts/src/errors/index.mjs";
-import { jsonResponse } from "./http.mjs";
+import { jsonResponse, parseCookies, SESSION_COOKIE_NAME } from "./http.mjs";
+import { localizeStructuredError } from "./i18n.mjs";
 
 export function statusForErrorCode(code) {
   switch (code) {
     case ERROR_CODES.AUTH_REQUIRED:
       return 401;
     case ERROR_CODES.FORBIDDEN:
+    case ERROR_CODES.SITE_EMBED_BLOCKED:
       return 403;
+    case ERROR_CODES.RESOURCE_DOMAIN_NOT_ALLOWED:
+      return 400;
     case ERROR_CODES.SITE_NOT_FOUND:
     case ERROR_CODES.PROJECT_NOT_FOUND:
     case ERROR_CODES.TAB_NOT_FOUND:
@@ -50,7 +54,17 @@ export function withRoute(handler, { authRequired = true } = {}) {
       const actor = authRequired ? await requireActor(request, context, traceId) : null;
       return await handler({ request, context, params, url, traceId, actor });
     } catch (error) {
-      const structuredError = asStructuredError(error, traceId);
+      const structuredError = localizeStructuredError(asStructuredError(error, traceId), request);
+      await context.logger?.write?.({
+        level: "error",
+        scope: "route",
+        method: request.method,
+        pathname: url.pathname,
+        code: structuredError.code,
+        traceId: structuredError.traceId,
+        message: structuredError.message,
+        userAction: structuredError.userAction
+      }).catch(() => undefined);
       return jsonResponse(structuredError, { status: statusForErrorCode(structuredError.code) });
     }
   };
@@ -69,7 +83,9 @@ export function assertServiceReady(request, traceId, authRequired) {
 }
 
 export async function requireActor(request, context, traceId) {
-  const token = request.headers.get("x-opensky-session")?.trim();
+  const headerToken = request.headers.get("x-opensky-session")?.trim();
+  const cookieToken = parseCookies(request)[SESSION_COOKIE_NAME]?.trim();
+  const token = headerToken || cookieToken || "";
   const session = await context.store.getSession();
 
   if (!token || !session || session.token !== token || session.signedIn !== true) {

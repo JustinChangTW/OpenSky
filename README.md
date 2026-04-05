@@ -28,6 +28,34 @@ OpenSky 提供受控的外部網站工作區，讓唯一使用者可以：
 - 保存 layout preferences
 - 使用 backend 管理 browse / session vault / file transfer / audit
 
+### Long-term Direction: 「無痕」體感
+
+OpenSky 的長期 UX 方向可以描述為：
+
+- 讓使用者感受到更接近 same-origin 的受控外站工作區
+- 盡量由 OpenSky backend 接手 allowlisted site 的 relay / session handling
+- 讓瀏覽器越少直接碰觸外部 origin 越好
+
+但這個方向有明確邊界：
+
+- 這不代表 OpenSky 會變成任意網址 proxy
+- 這不代表會支援 arbitrary browsing
+- 這不代表會繞過網站本身的安全限制或瀏覽器政策
+
+正確定義應該是：
+
+- `allowlist-only backend relay`
+- `managed external site shell`
+- `controlled same-origin feel where feasible`
+
+目前已落地的前置基礎包括：
+
+- frontend 對 backend request 已支援 `credentials: "include"`
+- backend auth 已接受 `HttpOnly` session cookie
+- backend 已有本機 / Pages 所需的 CORS 與 credential handling
+
+這些是後續實作 allowlisted relay 的基礎，不代表完整 relay 已全部完成。
+
 目前 repo 已具備可驗證的 MVP baseline，並已補上：
 
 - file-backed JSON persistence
@@ -102,6 +130,9 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+npm run build:web
+npm run dev:web
+npm run start:web
 npm run start:service
 ```
 
@@ -111,7 +142,23 @@ npm run start:service
 - `npm run typecheck` -> `node scripts/typecheck.mjs`
 - `npm run test` -> `node scripts/test.mjs`
 - `npm run build` -> `node scripts/build.mjs`
+- `npm run build:web` -> `npm run build --workspace @opensky/web`
+- `npm run dev:web` -> `npm run dev --workspace @opensky/web`
+- `npm run start:web` -> `npm run start --workspace @opensky/web`
 - `npm run start:service` -> `node apps/service/src/server.mjs`
+
+另外，`apps/web` 現在有自己的最小 package 定義：
+
+- `apps/web/package.json`
+- `apps/web/dev-server.mjs`
+
+用途如下：
+
+- `apps/web/src`：前端原始碼
+- `apps/web/dist`：build 輸出，GitHub Pages 會部署這個目錄
+- `apps/web/tests`：frontend 測試
+- `apps/web/dev-server.mjs`：本機開發用的靜態 dev server，直接服務 `apps/web/src`
+- `apps/web/package.json`：frontend workspace package，提供 `dev / start / build`
 
 ### Backend: Local Start
 
@@ -128,48 +175,52 @@ npm run start:service
   - username: `owner-admin`
   - password: `opensky-demo`
 
-### Frontend: Local Browser Testing
+### Frontend: Local Start
 
-這個 repo 目前沒有內建前端 dev server，也沒有 `npm run dev`。
-
-目前可行的前端本機流程是：
-
-1. 先 build
+frontend 目前已補上最小可用的 dev server，可直接從 repo root 啟動：
 
 ```powershell
-npm run build
+npm run dev:web
 ```
 
-2. 讓 `apps/web/dist` 透過你機器上現有的靜態檔案伺服器提供
+預設：
 
-重要：
+- frontend URL: `http://localhost:4173`
+- backend API base: `http://localhost:8787`
 
-- repo 沒有附帶 static server script
-- 不建議直接用 `file://` 開 `apps/web/dist/index.html`
-- 如果要在瀏覽器驗證 UI，你需要自己提供靜態伺服器
-
-例如，如果你的電腦已有 Python 3，可用：
+可選 env：
 
 ```powershell
-python -m http.server 4173 --directory apps/web/dist
+$env:OPEN_SKY_WEB_PORT="4173"
+$env:OPEN_SKY_API_BASE="http://localhost:8787"
+npm run dev:web
 ```
 
-然後在瀏覽器開：
-
-- `http://localhost:4173`
-
-若你不想起靜態伺服器，至少應先跑：
+若你只想產出 GitHub Pages 會使用的前端 bundle：
 
 ```powershell
-npm run test
-npm run build
+npm run build:web
 ```
+
+這會把 `apps/web/src` 複製到 `apps/web/dist`，不會另外啟靜態伺服器。
 
 ### Local Testing on Your Notebook
 
 若你要在筆電上快速驗證，建議順序：
 
-1. 跑 repo 驗證
+1. 先啟 backend
+
+```powershell
+npm run start:service
+```
+
+2. 再啟 frontend dev server
+
+```powershell
+npm run dev:web
+```
+
+3. 視需要補跑驗證
 
 ```powershell
 npm run lint
@@ -178,21 +229,124 @@ npm run test
 npm run build
 ```
 
-2. 啟 backend
+4. 在瀏覽器開：
 
-```powershell
-npm run start:service
-```
+- `http://localhost:4173`
 
-3. 用靜態伺服器提供 `apps/web/dist`
-
-4. 在瀏覽器測：
+5. 再測：
 
 - sign-in
 - sites / projects / tabs / bookmarks / notes
 - layout preference
 - session vault
 - file transfer preview -> approve -> complete
+
+### VSCode Debug: 測試受控 browse flow 是否正常
+
+如果你想在本機用 VSCode debug「proxy 功能是否正常」，請先用產品真實邊界來理解：
+
+- OpenSky 不是通用 proxy
+- 這裡要驗證的是 allowlist-only 的受控 browse flow
+- 也就是：
+  - allowlisted URL 可開啟
+  - 非 allowlisted URL 會被擋
+  - redirect 到 allowlist 外也會被擋
+  - frontend 真的有打到 backend 的 `/v1/browse/*`
+
+建議流程：
+
+1. 開兩個 Terminal
+2. Terminal 1 啟 backend
+
+```powershell
+npm run start:service
+```
+
+3. Terminal 2 啟 frontend
+
+```powershell
+npm run dev:web
+```
+
+4. 在瀏覽器開：
+
+- `http://localhost:4173`
+
+5. 用 demo credentials 登入：
+
+- username: `owner-admin`
+- password: `opensky-demo`
+
+6. 手動測：
+
+- 建立一個 allowlisted site
+- 建立 project
+- 開 tab 或觸發 browse open
+- 測一個 allowlisted URL
+- 再測一個不在 allowlist 的 URL
+
+預期結果：
+
+- allowlisted URL 可正常進入
+- 非 allowlisted URL 會回明確錯誤，例如 `URL_NOT_ALLOWED`
+- 不應出現 arbitrary browsing
+
+### VSCode Backend Breakpoints
+
+真正的 allowlist 驗證與 browse 判斷在 backend，不在 GitHub Pages frontend。
+
+建議優先下斷點的位置：
+
+- `apps/service/src/browse/routes.mjs`
+- `apps/service/src/sites/routes.mjs`
+- `packages/policy/src/index.mjs`
+- `apps/service/src/common/service-helpers.mjs`
+
+你要觀察的重點：
+
+- request 進來的 URL
+- 當前 site 的 allowlist 規則
+- `isUrlAllowed(...)` 的判斷結果
+- 被擋時回傳的錯誤 code 與 payload
+
+### VSCode Launch Example
+
+如果你想用 VSCode 的 `Run and Debug` 啟 backend，可用這類最小設定：
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSky Service",
+      "program": "${workspaceFolder}/apps/service/src/server.mjs",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PORT": "8787"
+      }
+    }
+  ]
+}
+```
+
+這份設定目前沒有自動寫進 repo；如果你要真正建立 `.vscode/launch.json`，可以另外再補。
+
+### 自動驗證
+
+除了手動測，也建議先跑：
+
+```powershell
+node scripts/test.mjs
+```
+
+目前與 browse flow 最相關的回歸測試會覆蓋：
+
+- allowlist blocking
+- blocked redirects
+- preview-before-approve
+- session / layout restoration
 
 ## Environment Variables
 
@@ -221,6 +375,7 @@ npm run start:service
 | Name | Purpose | Required |
 |---|---|---|
 | `OPEN_SKY_API_BASE` | injected into GitHub Pages `config.js`, points frontend to Render backend | yes for Pages deploy |
+| `OPEN_SKY_WEB_PORT` | local frontend dev server port for `npm run dev:web` | no, local only |
 
 ### Production Notes
 
@@ -237,6 +392,13 @@ npm run start:service
 ```powershell
 $env:OPEN_SKY_PERSIST_PATH="D:\\opensky-data\\state.json"
 npm run start:service
+```
+
+### Example: Local Frontend Against Local Backend
+
+```powershell
+$env:OPEN_SKY_API_BASE="http://localhost:8787"
+npm run dev:web
 ```
 
 ### Example: Firestore-backed Local Backend
@@ -520,17 +682,22 @@ node scripts/build.mjs
    - `AGENTS.md`
    - `CLAUDE.md`
    - `SKILL.md`
-2. 跑：
+2. 啟動服務：
+   - `npm run start:service`
+   - `npm run dev:web`
+3. 跑：
    - `npm run lint`
    - `npm run typecheck`
    - `npm run test`
-3. 修改時遵守：
+   - `npm run build`
+4. 修改時遵守：
    - allowlist-only
    - single-user
    - center-content-first
    - `maximized` default
-4. 修改後再跑：
-   - `npm run build`
+   - 「無痕」方向只能沿著 allowlist-only backend relay 前進，不能演變成通用 proxy
+5. 若只想驗證 frontend 輸出：
+   - `npm run build:web`
 
 ## PR Workflow with GitHub CLI
 
