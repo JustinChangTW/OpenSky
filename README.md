@@ -1,4 +1,4 @@
-# OpenSky
+﻿# OpenSky
 
 OpenSky 是一個單一使用者、allowlist-based 的外部網站工作區。
 
@@ -7,7 +7,7 @@ OpenSky 是一個單一使用者、allowlist-based 的外部網站工作區。
 - 前端：GitHub Pages 靜態網站
 - 後端：Render Web Service
 - 使用者模型：單一 owner-admin
-- 產品邊界：allowlist-only，不是任意網址瀏覽器，也不是通用 proxy
+- 產品邊界：allowlist-only 的受控 web access workspace，不是任意網址瀏覽器，也不是通用 proxy
 
 這份 README 的目標不是描述理想架構，而是根據目前 repo 的真實狀態，讓接手者可以：
 
@@ -511,17 +511,6 @@ node scripts/build.mjs
 - env 必須由你的 shell 或部署平台提供
 - PowerShell 可直接用 `$env:...` 設定
 
-### 6. 匯入 schema 驗證失敗
-
-目前 repo 中沒有明確的題庫匯入 pipeline 或 import schema 檔案。
-
-若你遇到所謂的 import/schema 問題，請先重新確認：
-
-- 相關功能是否真的已存在於這個版本
-- 是否是外部資料或後續需求，尚未進 repo
-
-不要直接假設 repo 內已有一套題庫匯入系統。
-
 ## Development Workflow
 
 建議日常流程：
@@ -619,3 +608,5 @@ gh pr create --draft
 - Render Web Service 是否已建立
 - Render env vars 是否已填妥
 - Firebase project / rules / service account 是否已在雲端正確建立
+
+
