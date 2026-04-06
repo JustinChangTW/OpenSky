@@ -1,4 +1,4 @@
-# OpenSky
+﻿# OpenSky
 
 OpenSky 是一個單一使用者、allowlist-based 的外部網站工作區。
 
@@ -7,7 +7,7 @@ OpenSky 是一個單一使用者、allowlist-based 的外部網站工作區。
 - 前端：GitHub Pages 靜態網站
 - 後端：Render Web Service
 - 使用者模型：單一 owner-admin
-- 產品邊界：allowlist-only，不是任意網址瀏覽器，也不是通用 proxy
+- 產品邊界：allowlist-only 的受控 web access workspace，不是任意網址瀏覽器，也不是通用 proxy
 
 這份 README 的目標不是描述理想架構，而是根據目前 repo 的真實狀態，讓接手者可以：
 
@@ -27,6 +27,34 @@ OpenSky 提供受控的外部網站工作區，讓唯一使用者可以：
 - 保存 tabs / bookmarks / notes
 - 保存 layout preferences
 - 使用 backend 管理 browse / session vault / file transfer / audit
+
+### Long-term Direction: 「無痕」體感
+
+OpenSky 的長期 UX 方向可以描述為：
+
+- 讓使用者感受到更接近 same-origin 的受控外站工作區
+- 盡量由 OpenSky backend 接手 allowlisted site 的 relay / session handling
+- 讓瀏覽器越少直接碰觸外部 origin 越好
+
+但這個方向有明確邊界：
+
+- 這不代表 OpenSky 會變成任意網址 proxy
+- 這不代表會支援 arbitrary browsing
+- 這不代表會繞過網站本身的安全限制或瀏覽器政策
+
+正確定義應該是：
+
+- `allowlist-only backend relay`
+- `managed external site shell`
+- `controlled same-origin feel where feasible`
+
+目前已落地的前置基礎包括：
+
+- frontend 對 backend request 已支援 `credentials: "include"`
+- backend auth 已接受 `HttpOnly` session cookie
+- backend 已有本機 / Pages 所需的 CORS 與 credential handling
+
+這些是後續實作 allowlisted relay 的基礎，不代表完整 relay 已全部完成。
 
 目前 repo 已具備可驗證的 MVP baseline，並已補上：
 
@@ -84,6 +112,132 @@ OpenSky 提供受控的外部網站工作區，讓唯一使用者可以：
 
 ## Local Development
 
+### 5-Minute Demo Flow
+
+如果你只是想確認 OpenSky demo prototype 有正常啟動，先照這個最短流程走：
+
+1. 啟 backend
+
+```powershell
+npm run start:service
+```
+
+2. 開另一個 terminal 啟 frontend
+
+```powershell
+npm run dev:web
+```
+
+3. 打開瀏覽器
+
+- `http://localhost:4173`
+- `http://localhost:8787/health`
+- `http://localhost:8787/v1/info`
+
+4. 用 demo 帳號登入
+
+- username: `owner-admin`
+- password: `opensky-demo`
+
+5. 建立一筆最簡單的白名單網站
+
+- `網站名稱`: `Demo`
+- `base domain`: `example.com`
+- `path rule`: `/`
+
+6. 建立一個 project
+
+- `專案名稱`: `Demo`
+
+7. 點 `開啟` 或 `開啟已選網站`
+
+預期結果：
+
+- backend 持續存活，沒有 crash
+- `/health` 與 `/v1/info` 都能回應 JSON
+- frontend 不應顯示 `Backend unavailable`
+- 可以建立 site / project
+- 可以開出受控 tab
+- 中央內容區至少會進入 proxy 文件視圖，而不是停在空白初始狀態
+
+如果你只是要驗證「本機流程是否有跑起來」，先完成上面這 7 步，再去測較複雜的網站。
+
+### Verified Built-in Demo Preset
+
+現在系統在開發 / 測試環境下，若資料庫是空的，會自動 seed 一組我已驗證可正常呈現的 preset：
+
+- `site`: `Example`
+- `project`: `Demo Workspace`
+- `verified entry URL`: `https://example.com/`
+- `verified secondary URL`: `https://developer.mozilla.org/zh-TW/`
+
+這組 preset 的特性：
+
+- 使用真實可連線網站
+- 一開即可直接點測，不必先手動新增設定
+- 符合目前 allowlist 驗證流程
+- 可快速驗證受控 relay 是否正常
+
+所以在全新狀態下，你登入後應該可以直接：
+
+1. 看見 `Demo Workspace`
+2. 在中央輸入框下方看到 3 個可直接點的測試按鈕
+3. 系統會優先自動開啟 `https://example.com/`
+4. 你也可以直接點其他測試按鈕切換
+
+目前內建的 direct test shortcuts：
+
+- `Example.com` -> `https://example.com/`
+- `MDN zh-TW` -> `https://developer.mozilla.org/zh-TW/`
+
+另外，開發環境下系統也會自動補齊這些 demo sites：
+
+- `Example`
+- `MDN Docs`
+
+如果你要先驗證系統本身，而不是驗證外站相容性，請優先用這組 preset。
+
+### Verified Real-Site Demo Example: MDN
+
+如果你要驗證「真實網站是否能透過目前的受控轉發原型正常顯示」，目前我已實測可用的範例是：
+
+- target URL: `https://developer.mozilla.org/zh-TW/`
+
+建議設定如下：
+
+- `網站名稱`: `MDN`
+- `base domain`: `developer.mozilla.org, transcend-cdn.com`
+- `path rule`: `/zh-TW/`
+
+這組設定的實測結果：
+
+- `browse/open`: 成功
+- `browse/content`: 成功
+- final URL 一致
+- `<title>` 一致
+- 第一個 `<h1>` 一致
+- `unsupportedHosts`: `[]`
+
+你可以把它當成目前 repo 的「真實網站 demo 驗證範例」。
+
+最短測試流程：
+
+1. 啟 backend：`npm run start:service`
+2. 啟 frontend：`npm run dev:web`
+3. 登入 `owner-admin / opensky-demo`
+4. 建立一筆 site：
+   - `網站名稱`: `MDN`
+   - `base domain`: `developer.mozilla.org, transcend-cdn.com`
+   - `path rule`: `/zh-TW/`
+5. 建立或選擇一個 project
+6. 開啟：
+   - `https://developer.mozilla.org/zh-TW/`
+
+注意：
+
+- 這是目前已驗證可用的真實網站範例，不代表所有真實網站都已完整相容。
+- 對高度動態、anti-bot、SSO、複雜登入流程網站，仍可能只有部分可用。
+
 ### Prerequisites
 
 - Git
@@ -102,6 +256,9 @@ npm run lint
 npm run typecheck
 npm run test
 npm run build
+npm run build:web
+npm run dev:web
+npm run start:web
 npm run start:service
 ```
 
@@ -111,7 +268,23 @@ npm run start:service
 - `npm run typecheck` -> `node scripts/typecheck.mjs`
 - `npm run test` -> `node scripts/test.mjs`
 - `npm run build` -> `node scripts/build.mjs`
+- `npm run build:web` -> `npm run build --workspace @opensky/web`
+- `npm run dev:web` -> `npm run dev --workspace @opensky/web`
+- `npm run start:web` -> `npm run start --workspace @opensky/web`
 - `npm run start:service` -> `node apps/service/src/server.mjs`
+
+另外，`apps/web` 現在有自己的最小 package 定義：
+
+- `apps/web/package.json`
+- `apps/web/dev-server.mjs`
+
+用途如下：
+
+- `apps/web/src`：前端原始碼
+- `apps/web/dist`：build 輸出，GitHub Pages 會部署這個目錄
+- `apps/web/tests`：frontend 測試
+- `apps/web/dev-server.mjs`：本機開發用的靜態 dev server，直接服務 `apps/web/src`
+- `apps/web/package.json`：frontend workspace package，提供 `dev / start / build`
 
 ### Backend: Local Start
 
@@ -128,48 +301,52 @@ npm run start:service
   - username: `owner-admin`
   - password: `opensky-demo`
 
-### Frontend: Local Browser Testing
+### Frontend: Local Start
 
-這個 repo 目前沒有內建前端 dev server，也沒有 `npm run dev`。
-
-目前可行的前端本機流程是：
-
-1. 先 build
+frontend 目前已補上最小可用的 dev server，可直接從 repo root 啟動：
 
 ```powershell
-npm run build
+npm run dev:web
 ```
 
-2. 讓 `apps/web/dist` 透過你機器上現有的靜態檔案伺服器提供
+預設：
 
-重要：
+- frontend URL: `http://localhost:4173`
+- backend API base: `http://localhost:8787`
 
-- repo 沒有附帶 static server script
-- 不建議直接用 `file://` 開 `apps/web/dist/index.html`
-- 如果要在瀏覽器驗證 UI，你需要自己提供靜態伺服器
-
-例如，如果你的電腦已有 Python 3，可用：
+可選 env：
 
 ```powershell
-python -m http.server 4173 --directory apps/web/dist
+$env:OPEN_SKY_WEB_PORT="4173"
+$env:OPEN_SKY_API_BASE="http://localhost:8787"
+npm run dev:web
 ```
 
-然後在瀏覽器開：
-
-- `http://localhost:4173`
-
-若你不想起靜態伺服器，至少應先跑：
+若你只想產出 GitHub Pages 會使用的前端 bundle：
 
 ```powershell
-npm run test
-npm run build
+npm run build:web
 ```
+
+這會把 `apps/web/src` 複製到 `apps/web/dist`，不會另外啟靜態伺服器。
 
 ### Local Testing on Your Notebook
 
 若你要在筆電上快速驗證，建議順序：
 
-1. 跑 repo 驗證
+1. 先啟 backend
+
+```powershell
+npm run start:service
+```
+
+2. 再啟 frontend dev server
+
+```powershell
+npm run dev:web
+```
+
+3. 視需要補跑驗證
 
 ```powershell
 npm run lint
@@ -178,21 +355,251 @@ npm run test
 npm run build
 ```
 
-2. 啟 backend
+4. 在瀏覽器開：
 
-```powershell
-npm run start:service
-```
+- `http://localhost:4173`
 
-3. 用靜態伺服器提供 `apps/web/dist`
-
-4. 在瀏覽器測：
+5. 再測：
 
 - sign-in
 - sites / projects / tabs / bookmarks / notes
 - layout preference
 - session vault
 - file transfer preview -> approve -> complete
+
+### 本機啟動順序
+
+目前最穩定的本機開發順序是：
+
+1. `npm run start:service`
+2. `npm run dev:web`
+3. 打開 `http://localhost:4173`
+
+不要反過來先依賴 frontend 去猜 backend 是否存在。
+
+若看到：
+
+- `Backend unavailable`
+- `Failed to fetch`
+
+先檢查：
+
+1. backend terminal 還在不在
+2. `http://localhost:8787/health` 是否打得開
+3. frontend terminal 是否顯示 `Backend API configured via OPEN_SKY_API_BASE=http://localhost:8787`
+
+### VSCode Debug: 測試受控 browse flow 是否正常
+
+如果你想在本機用 VSCode debug「proxy 功能是否正常」，請先用產品真實邊界來理解：
+
+- OpenSky 不是通用 proxy
+- 這裡要驗證的是 allowlist-only 的受控 browse flow
+- 也就是：
+  - allowlisted URL 可開啟
+  - 非 allowlisted URL 會被擋
+  - redirect 到 allowlist 外也會被擋
+  - frontend 真的有打到 backend 的 `/v1/browse/*`
+
+建議流程：
+
+1. 開兩個 Terminal
+2. Terminal 1 啟 backend
+
+```powershell
+npm run start:service
+```
+
+3. Terminal 2 啟 frontend
+
+```powershell
+npm run dev:web
+```
+
+4. 在瀏覽器開：
+
+- `http://localhost:4173`
+
+5. 用 demo credentials 登入：
+
+- username: `owner-admin`
+- password: `opensky-demo`
+
+6. 手動測：
+
+- 建立一個 allowlisted site
+- 建立 project
+- 開 tab 或觸發 browse open
+- 測一個 allowlisted URL
+- 再測一個不在 allowlist 的 URL
+
+預期結果：
+
+- allowlisted URL 可正常進入
+- 非 allowlisted URL 會回明確錯誤，例如 `URL_NOT_ALLOWED`
+- 不應出現 arbitrary browsing
+
+### VSCode Backend Breakpoints
+
+真正的 allowlist 驗證與 browse 判斷在 backend，不在 GitHub Pages frontend。
+
+建議優先下斷點的位置：
+
+- `apps/service/src/browse/routes.mjs`
+- `apps/service/src/sites/routes.mjs`
+- `packages/policy/src/index.mjs`
+- `apps/service/src/common/service-helpers.mjs`
+
+你要觀察的重點：
+
+- request 進來的 URL
+- 當前 site 的 allowlist 規則
+- `isUrlAllowed(...)` 的判斷結果
+- 被擋時回傳的錯誤 code 與 payload
+
+### VSCode Launch Example
+
+如果你想用 VSCode 的 `Run and Debug` 啟 backend，可用這類最小設定：
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSky Service",
+      "program": "${workspaceFolder}/apps/service/src/server.mjs",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PORT": "8787"
+      }
+    }
+  ]
+}
+```
+
+這份設定目前沒有自動寫進 repo；如果你要真正建立 `.vscode/launch.json`，可以另外再補。
+
+### 自動驗證
+
+除了手動測，也建議先跑：
+
+```powershell
+node scripts/test.mjs
+```
+
+目前與 browse flow 最相關的回歸測試會覆蓋：
+
+- allowlist blocking
+- blocked redirects
+- preview-before-approve
+- session / layout restoration
+
+## 白名單網站欄位說明
+
+目前 UI 已把站台建立表單簡化成最小必要欄位，只保留：
+
+1. `網站名稱`
+2. `base domain`
+3. `path rule`
+
+建立站台時，以下能力目前固定預設為啟用，不需要另外勾選：
+
+- session memory
+- upload
+- download
+
+### 1. 網站名稱
+
+用途：
+
+- 給你自己辨識這個白名單站台
+- 顯示在左側站台清單與工作區狀態列
+
+建議填法：
+
+- `Google`
+- `Mega`
+- `內部報表`
+
+### 2. base domain
+
+用途：
+
+- 定義這個站台允許的主網域
+- allowlist 驗證會以這個 hostname 為基礎判斷
+
+這個欄位現在支援：
+
+- 單一網域
+- 多個網域，以逗號分隔
+
+用途：
+
+- 第一個網域會當作主要開站網域
+- 其餘網域可用來涵蓋同站台代理時需要的資產網域
+
+這個欄位應該填 hostname；若有多個，就用逗號分隔。
+
+正確：
+
+- `google.com`
+- `www.google.com`
+- `www.megaholdings.com.tw`
+- `google.com, www.google.com`
+- `www.megaholdings.com.tw, static.megaholdings.com.tw`
+
+錯誤：
+
+- `https://google.com`
+- `https://www.megaholdings.com.tw/`
+- `https://www.megaholdings.com.tw/news/list`
+
+補充：
+
+- 現在前端已加防呆，如果你貼了完整 URL，系統會盡量自動抽出 hostname
+- 若你需要讓頁面上的 CSS / 圖片 / 字型也更完整顯示，請把資產網域也一起放進同一筆 site 的 `base domain`
+- 最穩定的填法仍然是直接填純網域，必要時用逗號分隔多個網域
+
+### 3. path rule
+
+用途：
+
+- 限制這個站台允許開啟的路徑範圍
+- `browse/open` 與 `browse/navigate` 都會檢查這個 path 規則
+
+正確：
+
+- `/`
+- `/team`
+- `/news/list`
+
+說明：
+
+- `/` 代表允許該網域底下的根路徑開始導頁
+- `/team` 代表只允許 `/team` 底下的頁面
+
+### Mega 測試範例
+
+如果你要測：
+
+- `https://www.megaholdings.com.tw/`
+
+建議白名單填法：
+
+- `網站名稱`: `Mega`
+- `base domain`: `www.megaholdings.com.tw`
+- `path rule`: `/`
+
+如果網站會自動導到別的 host，例如：
+
+- `megaholdings.com.tw -> www.megaholdings.com.tw`
+
+那 redirect 後的 host 也必須在 allowlist 內，否則還是會被擋。
+
+更穩妥的填法可以是：
+
+- `base domain`: `megaholdings.com.tw, www.megaholdings.com.tw`
 
 ## Environment Variables
 
@@ -221,6 +628,7 @@ npm run start:service
 | Name | Purpose | Required |
 |---|---|---|
 | `OPEN_SKY_API_BASE` | injected into GitHub Pages `config.js`, points frontend to Render backend | yes for Pages deploy |
+| `OPEN_SKY_WEB_PORT` | local frontend dev server port for `npm run dev:web` | no, local only |
 
 ### Production Notes
 
@@ -237,6 +645,13 @@ npm run start:service
 ```powershell
 $env:OPEN_SKY_PERSIST_PATH="D:\\opensky-data\\state.json"
 npm run start:service
+```
+
+### Example: Local Frontend Against Local Backend
+
+```powershell
+$env:OPEN_SKY_API_BASE="http://localhost:8787"
+npm run dev:web
 ```
 
 ### Example: Firestore-backed Local Backend
@@ -511,17 +926,6 @@ node scripts/build.mjs
 - env 必須由你的 shell 或部署平台提供
 - PowerShell 可直接用 `$env:...` 設定
 
-### 6. 匯入 schema 驗證失敗
-
-目前 repo 中沒有明確的題庫匯入 pipeline 或 import schema 檔案。
-
-若你遇到所謂的 import/schema 問題，請先重新確認：
-
-- 相關功能是否真的已存在於這個版本
-- 是否是外部資料或後續需求，尚未進 repo
-
-不要直接假設 repo 內已有一套題庫匯入系統。
-
 ## Development Workflow
 
 建議日常流程：
@@ -531,17 +935,22 @@ node scripts/build.mjs
    - `AGENTS.md`
    - `CLAUDE.md`
    - `SKILL.md`
-2. 跑：
+2. 啟動服務：
+   - `npm run start:service`
+   - `npm run dev:web`
+3. 跑：
    - `npm run lint`
    - `npm run typecheck`
    - `npm run test`
-3. 修改時遵守：
+   - `npm run build`
+4. 修改時遵守：
    - allowlist-only
    - single-user
    - center-content-first
    - `maximized` default
-4. 修改後再跑：
-   - `npm run build`
+   - 「無痕」方向只能沿著 allowlist-only backend relay 前進，不能演變成通用 proxy
+5. 若只想驗證 frontend 輸出：
+   - `npm run build:web`
 
 ## PR Workflow with GitHub CLI
 
@@ -619,3 +1028,5 @@ gh pr create --draft
 - Render Web Service 是否已建立
 - Render env vars 是否已填妥
 - Firebase project / rules / service account 是否已在雲端正確建立
+
+

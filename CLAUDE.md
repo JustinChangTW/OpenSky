@@ -28,6 +28,8 @@
 - Do not move backend-only policy or session logic into the frontend
 - Do not assume Firebase Auth / Storage exist; current Firebase usage is Firestore persistence only
 - Do not assume `render.yaml`, Firebase rules, or a frontend dev server exist
+- If the user asks for a more "stealth" browsing feel, interpret that as `allowlist-only backend relay`, not generic proxy behavior
+- Any relay-style work must stay scoped to allowlisted sites and explicit unsupported cases
 - If future LLM features are added, outputs must stream
 
 ## Current Repo Facts

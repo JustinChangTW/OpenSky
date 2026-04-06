@@ -1,0 +1,63 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSky Dev Stack",
+      "program": "${workspaceFolder}/scripts/dev.mjs",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PORT": "8787",
+        "OPEN_SKY_WEB_PORT": "4173"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSky Service",
+      "program": "${workspaceFolder}/apps/service/src/server.mjs",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PORT": "8787"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "OpenSky Web Dev Server",
+      "program": "${workspaceFolder}/apps/web/dev-server.mjs",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OPEN_SKY_API_BASE": "http://127.0.0.1:8787",
+        "OPEN_SKY_WEB_PORT": "4173"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    },
+    {
+      "type": "pwa-msedge",
+      "request": "launch",
+      "name": "OpenSky Frontend",
+      "url": "http://localhost:4173",
+      "webRoot": "${workspaceFolder}/apps/web/src"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "OpenSky Full Stack",
+      "configurations": [
+        "OpenSky Dev Stack",
+        "OpenSky Frontend"
+      ],
+      "stopAll": true
+    }
+  ]
+}

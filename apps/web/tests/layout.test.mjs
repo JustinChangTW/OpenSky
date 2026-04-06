@@ -48,5 +48,5 @@ test("fullscreen fallback returns maximized layout and warning banner", async ()
   });
 
   assert.equal(result.layout.viewMode, "maximized");
-  assert.equal(result.banner.title, "FULLSCREEN_NOT_AVAILABLE");
+  assert.equal(result.banner.title, "Fullscreen unavailable");
 });

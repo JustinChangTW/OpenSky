@@ -2,7 +2,14 @@ import { createServiceContext } from "../../../apps/service/src/common/service-c
 import { createServiceHandler } from "../../../apps/service/src/app.mjs";
 
 export function createTestClient(options = {}) {
-  const context = createServiceContext(options);
+  const mergedEnv = {
+    OPEN_SKY_ENABLE_DEMO_PRESET: options.enableDemoPreset ? "true" : "false",
+    ...(options.env ?? {})
+  };
+  const context = createServiceContext({
+    ...options,
+    env: mergedEnv
+  });
   const handler = createServiceHandler(context);
 
   return {

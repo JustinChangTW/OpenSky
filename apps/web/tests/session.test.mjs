@@ -8,6 +8,7 @@ test("requestJson always sends x-opensky-session header", async () => {
   const originalConfig = globalThis.OPEN_SKY_CONFIG;
   let headers = null;
   let requestedUrl = "";
+  let credentials = null;
 
   globalThis.localStorage = {
     getItem() {
@@ -20,6 +21,7 @@ test("requestJson always sends x-opensky-session header", async () => {
   globalThis.fetch = async (url, init) => {
     requestedUrl = url;
     headers = init.headers;
+    credentials = init.credentials;
     return {
       ok: true,
       async json() {
@@ -33,6 +35,8 @@ test("requestJson always sends x-opensky-session header", async () => {
     assert.equal(requestedUrl, "https://api.example.com/v1/me");
     assert.equal(headers["x-opensky-session"], "session_demo");
     assert.equal(headers["content-type"], "application/json");
+    assert.equal(headers["accept-language"], "en");
+    assert.equal(credentials, "include");
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.localStorage = originalStorage;
@@ -46,9 +50,13 @@ test("requestJson keeps x-opensky-session header present when no token exists", 
   const originalConfig = globalThis.OPEN_SKY_CONFIG;
   let headers = null;
   let requestedUrl = "";
+  let credentials = null;
 
   globalThis.localStorage = {
-    getItem() {
+    getItem(key) {
+      if (key === "opensky.locale") {
+        return "zh-TW";
+      }
       return "";
     }
   };
@@ -58,6 +66,7 @@ test("requestJson keeps x-opensky-session header present when no token exists", 
   globalThis.fetch = async (url, init) => {
     requestedUrl = url;
     headers = init.headers;
+    credentials = init.credentials;
     return {
       ok: true,
       async json() {
@@ -70,6 +79,8 @@ test("requestJson keeps x-opensky-session header present when no token exists", 
     await requestJson("/v1/auth/sign-in", { method: "POST", body: "{}" });
     assert.equal(requestedUrl, "https://api.example.com/v1/auth/sign-in");
     assert.equal(headers["x-opensky-session"], "");
+    assert.equal(headers["accept-language"], "zh");
+    assert.equal(credentials, "include");
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.localStorage = originalStorage;

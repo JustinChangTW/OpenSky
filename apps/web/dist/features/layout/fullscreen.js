@@ -1,10 +1,11 @@
 import { reduceLayoutState } from "./state.js";
+import { createTranslator, normalizeLocale } from "../../i18n-runtime.js";
 
-function createFullscreenFailureBanner(message) {
+function createFullscreenFailureBanner(title, message) {
   return {
     id: crypto.randomUUID(),
     tone: "warning",
-    title: "FULLSCREEN_NOT_AVAILABLE",
+    title,
     message
   };
 }
@@ -36,11 +37,12 @@ export async function attemptFullscreen({ enterFullscreen, exitFullscreen, isFul
   }
 }
 
-export async function requestFullscreenWithFallback({ documentRef, targetElement, layout }) {
+export async function requestFullscreenWithFallback({ documentRef, targetElement, layout, locale = "en" }) {
+  const t = createTranslator(normalizeLocale(locale));
   const result = await attemptFullscreen({
     enterFullscreen: async () => {
       if (!targetElement?.requestFullscreen) {
-        throw new Error("Fullscreen is not available in this environment.");
+        throw new Error(t("error.FULLSCREEN_NOT_AVAILABLE.message"));
       }
 
       await targetElement.requestFullscreen();
@@ -68,8 +70,12 @@ export async function requestFullscreenWithFallback({ documentRef, targetElement
     banner: result.banner
       ? {
           ...result.banner,
-          title: "FULLSCREEN_NOT_AVAILABLE"
+          title: t("error.FULLSCREEN_NOT_AVAILABLE.title"),
+          message: result.banner.message || t("error.FULLSCREEN_NOT_AVAILABLE.message")
         }
-      : createFullscreenFailureBanner("Fullscreen is not available in this environment.")
+      : createFullscreenFailureBanner(
+          t("error.FULLSCREEN_NOT_AVAILABLE.title"),
+          t("error.FULLSCREEN_NOT_AVAILABLE.message")
+        )
   };
 }

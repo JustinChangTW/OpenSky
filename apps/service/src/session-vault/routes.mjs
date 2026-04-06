@@ -44,6 +44,12 @@ export function registerSessionVaultRoutes(router) {
     }
     const vault = { ...currentVault, ...parseSessionVaultInput(payload), vaultId: params.vaultId };
     await writeRecord(context, "sessionVault", params.vaultId, vault);
+    if (vault.status === "revoked" || vault.status === "deleted") {
+      await context.relayCookieJar?.clear?.({
+        siteId: vault.siteId,
+        projectId: vault.projectId ?? null
+      }).catch(() => undefined);
+    }
     await writeAudit(context, { actorId: actor.actorId, action: "session-vault.update", targetType: "ExternalSessionVault", targetId: params.vaultId, result: "success" });
     return jsonResponse(vault);
   }));
@@ -51,6 +57,10 @@ export function registerSessionVaultRoutes(router) {
   router.add("DELETE", "/v1/session-vault/{vaultId}", withRoute(async ({ context, params, traceId, actor }) => {
     const currentVault = await getRecord(context, "sessionVault", params.vaultId, ERROR_CODES.SESSION_VAULT_NOT_FOUND, traceId, "Session vault");
     await writeRecord(context, "sessionVault", params.vaultId, { ...currentVault, status: "deleted" });
+    await context.relayCookieJar?.clear?.({
+      siteId: currentVault.siteId,
+      projectId: currentVault.projectId ?? null
+    }).catch(() => undefined);
     await writeAudit(context, { actorId: actor.actorId, action: "session-vault.delete", targetType: "ExternalSessionVault", targetId: params.vaultId, result: "success" });
     return jsonResponse({ deleted: true, vaultId: params.vaultId });
   }));

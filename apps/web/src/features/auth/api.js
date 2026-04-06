@@ -1,5 +1,9 @@
 import { requestJson, saveSessionToken } from "./session.js";
 
+export async function fetchServiceInfo() {
+  return requestJson("/v1/info", { method: "GET" });
+}
+
 export async function fetchSession() {
   return requestJson("/v1/me", { method: "GET" });
 }

@@ -1,4 +1,8 @@
-export function createBannerMarkup(banners) {
+import { createTranslator, normalizeLocale } from "../i18n-runtime.js";
+
+export function createBannerMarkup(banners, locale = "en") {
+  const t = createTranslator(normalizeLocale(locale));
+
   if (!banners.length) {
     return '<div class="banner-stack banner-stack--empty" aria-live="polite"></div>';
   }
@@ -12,7 +16,7 @@ export function createBannerMarkup(banners) {
             <p>${banner.message}</p>
           </div>
           <button type="button" class="banner__dismiss" data-action="dismiss-banner" data-banner-id="${banner.id}">
-            Dismiss
+            ${t("banner.dismiss")}
           </button>
         </article>
       `).join("")}

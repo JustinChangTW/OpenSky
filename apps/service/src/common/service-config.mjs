@@ -16,12 +16,36 @@ function isDemoCredentialPair(username, password) {
   return username === DEFAULT_OWNER_USERNAME && password === DEFAULT_OWNER_PASSWORD;
 }
 
+function parseAllowedOrigins(value) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseBooleanFlag(value, fallback) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
 export function createServiceConfig(env = process.env) {
   const environment = normalizeEnvironment(env.OPEN_SKY_ENV);
   const ownerUsername = String(env.OPEN_SKY_OWNER_USERNAME ?? DEFAULT_OWNER_USERNAME).trim();
   const ownerPassword = String(env.OPEN_SKY_OWNER_PASSWORD ?? DEFAULT_OWNER_PASSWORD);
   const rawPersistPath = String(env.OPEN_SKY_PERSIST_PATH ?? "").trim();
   const persistPath = rawPersistPath ? path.resolve(rawPersistPath) : "";
+  const rawLogPath = String(env.OPEN_SKY_LOG_PATH ?? "").trim();
+  const logPath = rawLogPath ? path.resolve(rawLogPath) : path.resolve("logs", "opensky-service.log");
+  const allowedOrigins = parseAllowedOrigins(env.OPEN_SKY_ALLOWED_ORIGINS);
   const firebaseProjectId = String(env.OPEN_SKY_FIREBASE_PROJECT_ID ?? "").trim();
   const firebaseClientEmail = String(env.OPEN_SKY_FIREBASE_CLIENT_EMAIL ?? "").trim();
   const firebasePrivateKey = String(env.OPEN_SKY_FIREBASE_PRIVATE_KEY ?? "");
@@ -30,6 +54,10 @@ export function createServiceConfig(env = process.env) {
   const firebaseConfigured = Boolean(firebaseProjectId && firebaseClientEmail && firebasePrivateKey);
   const firebasePartiallyConfigured = !firebaseConfigured && Boolean(firebaseProjectId || firebaseClientEmail || firebasePrivateKey);
   const persistenceMode = firebaseConfigured ? "firestore" : persistPath ? "file" : "memory";
+  const demoPresetEnabled = parseBooleanFlag(
+    env.OPEN_SKY_ENABLE_DEMO_PRESET,
+    environment !== "production" && persistenceMode !== "firestore"
+  );
   const startupWarnings = [];
 
   if (firebasePartiallyConfigured) {
@@ -59,7 +87,10 @@ export function createServiceConfig(env = process.env) {
     ownerUsername,
     ownerPassword,
     persistPath,
+    logPath,
+    allowedOrigins,
     persistenceMode,
+    demoPresetEnabled,
     startupWarnings,
     firebase: {
       configured: firebaseConfigured,
@@ -79,6 +110,8 @@ export function createRuntimeDiagnostics(config, startedAt = toIsoTimestamp()) {
     persistenceMode: config.persistenceMode,
     persistPathConfigured: config.persistenceMode === "file",
     firebaseConfigured: config.persistenceMode === "firestore",
+    demoPresetEnabled: config.demoPresetEnabled,
+    logPath: config.logPath,
     startupWarnings: [...config.startupWarnings]
   };
 }
@@ -87,5 +120,5 @@ export function formatStartupLog(runtime) {
   const warningSuffix = runtime.startupWarnings.length
     ? ` warnings=${runtime.startupWarnings.join(",")}`
     : "";
-  return `OpenSky runtime env=${runtime.environment} persistence=${runtime.persistenceMode}${warningSuffix}`;
+  return `OpenSky runtime env=${runtime.environment} persistence=${runtime.persistenceMode} logPath=${runtime.logPath}${warningSuffix}`;
 }
