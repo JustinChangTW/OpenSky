@@ -281,26 +281,150 @@ function rewriteCssUrls(cssText, baseUrl, tabId) {
     });
 }
 
+function resolveProxyAbsoluteUrl(candidateUrl, baseUrl) {
+  const trimmedValue = String(candidateUrl ?? "").trim();
+  if (!trimmedValue || trimmedValue.startsWith("data:") || trimmedValue.startsWith("javascript:")) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmedValue, baseUrl).href;
+  } catch {
+    return null;
+  }
+}
+
+function rewriteSrcSetValue(srcSetValue, baseUrl, tabId) {
+  return String(srcSetValue ?? "")
+    .split(",")
+    .map((entry) => {
+      const [candidateUrl, descriptor] = entry.trim().split(/\s+/, 2);
+      const absoluteUrl = resolveProxyAbsoluteUrl(candidateUrl, baseUrl);
+      if (!absoluteUrl) {
+        return "";
+      }
+      const proxiedUrl = createBrowseResourceUrl(tabId, absoluteUrl);
+      return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+function createRelayRuntimeScript(tabId, baseUrl) {
+  const serializedTabId = JSON.stringify(String(tabId ?? ""));
+  const serializedBaseUrl = JSON.stringify(String(baseUrl ?? ""));
+
+  return [
+    "(function(){",
+    `const TAB_ID=${serializedTabId};`,
+    `const BASE_URL=${serializedBaseUrl};`,
+    "const MESSAGE_NS='opensky-proxy';",
+    "const toAbsolute=(value)=>{",
+    "  const raw=String(value??'').trim();",
+    "  if(!raw){return BASE_URL;}",
+    "  return new URL(raw, window.location.href.startsWith('about:') ? BASE_URL : window.location.href).href;",
+    "};",
+    "const toProxy=(targetUrl)=>`/v1/browse/resource?tabId=${encodeURIComponent(TAB_ID)}&resourceUrl=${encodeURIComponent(targetUrl)}`;",
+    "const notify=(type,payload={})=>{",
+    "  try{ window.parent?.postMessage?.({ source: MESSAGE_NS, type, tabId: TAB_ID, ...payload }, '*'); }catch{}",
+    "};",
+    "const nativeFetch=window.fetch?.bind(window);",
+    "if(nativeFetch){",
+    "  window.fetch=(input,init={})=>{",
+    "    const request=input instanceof Request ? input : null;",
+    "    const candidateUrl=request ? request.url : input;",
+    "    const absoluteUrl=toAbsolute(candidateUrl);",
+    "    const method=String(init.method ?? request?.method ?? 'GET').toUpperCase();",
+    "    const headers=new Headers(init.headers ?? request?.headers ?? {});",
+    "    const body=(init.body !== undefined) ? init.body : request?.body;",
+    "    return nativeFetch(toProxy(absoluteUrl), { ...init, method, headers, body, credentials: 'include' });",
+    "  };",
+    "}",
+    "if(window.XMLHttpRequest?.prototype){",
+    "  const nativeOpen=window.XMLHttpRequest.prototype.open;",
+    "  window.XMLHttpRequest.prototype.open=function(method,url,...rest){",
+    "    const absoluteUrl=toAbsolute(url);",
+    "    return nativeOpen.call(this, method, toProxy(absoluteUrl), ...rest);",
+    "  };",
+    "}",
+    "if(navigator?.sendBeacon){",
+    "  const nativeSendBeacon=navigator.sendBeacon.bind(navigator);",
+    "  navigator.sendBeacon=(url,data)=>nativeSendBeacon(toProxy(toAbsolute(url)), data);",
+    "}",
+    "if(window.EventSource){",
+    "  const NativeEventSource=window.EventSource;",
+    "  window.EventSource=function(url,config){",
+    "    return new NativeEventSource(toProxy(toAbsolute(url)), config);",
+    "  };",
+    "  window.EventSource.prototype=NativeEventSource.prototype;",
+    "}",
+    "if(window.WebSocket){",
+    "  window.WebSocket=function(url){",
+    "    const blockedUrl=toAbsolute(url);",
+    "    notify('error', { code: 'WEBSOCKET_UNSUPPORTED', message: `WebSocket is not supported in the OpenSky relay MVP: ${blockedUrl}` });",
+    "    throw new Error(`WebSocket is not supported in the OpenSky relay MVP: ${blockedUrl}`);",
+    "  };",
+    "}",
+    "if(window.open){",
+    "  const nativeOpen=window.open.bind(window);",
+    "  window.open=(url,target,features)=>nativeOpen(toProxy(toAbsolute(url || BASE_URL)), target, features);",
+    "}",
+    "try{",
+    "  const nativeAssign=window.location.assign.bind(window.location);",
+    "  const nativeReplace=window.location.replace.bind(window.location);",
+    "  window.location.assign=(url)=>notify('navigate', { nextUrl: toAbsolute(url) });",
+    "  window.location.replace=(url)=>notify('navigate', { nextUrl: toAbsolute(url) });",
+    "  void nativeAssign; void nativeReplace;",
+    "}catch{}",
+    "document.addEventListener('click',(event)=>{",
+    "  const anchor=event.target?.closest?.('a[href]');",
+    "  if(!anchor){return;}",
+    "  const href=String(anchor.getAttribute('href') ?? '').trim();",
+    "  if(!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')){return;}",
+    "  event.preventDefault();",
+    "  notify('navigate', { nextUrl: toAbsolute(href) });",
+    "});",
+    "document.addEventListener('submit',(event)=>{",
+    "  const form=event.target;",
+    "  if(!(form instanceof HTMLFormElement)){return;}",
+    "  const method=String(form.getAttribute('method') ?? 'GET').toUpperCase();",
+    "  const action=toAbsolute(form.getAttribute('action') || BASE_URL);",
+    "  if(method==='GET'){",
+    "    event.preventDefault();",
+    "    const nextUrl=new URL(action);",
+    "    const formData=new FormData(form);",
+    "    for(const [name,value] of formData.entries()){",
+    "      nextUrl.searchParams.append(name, String(value));",
+    "    }",
+    "    notify('navigate', { nextUrl: nextUrl.href });",
+    "    return;",
+    "  }",
+    "  form.setAttribute('action', toProxy(action));",
+    "});",
+    "window.addEventListener('error',(event)=>{",
+    "  notify('log', { level: 'error', scope: 'iframe-error', message: event?.message ?? 'Unknown iframe error' });",
+    "});",
+    "window.addEventListener('unhandledrejection',(event)=>{",
+    "  const reason=event?.reason;",
+    "  notify('log', { level: 'error', scope: 'iframe-unhandledrejection', message: reason?.message ?? String(reason ?? 'Unhandled rejection') });",
+    "});",
+    "})();"
+  ].join("\n");
+}
+
 function sanitizeRelayedDocument(activeDocument) {
   const { documentHtml, finalUrl, requestedUrl, tabId } = activeDocument ?? {};
   const baseUrl = finalUrl ?? requestedUrl ?? "";
   if (typeof DOMParser === "undefined") {
     return {
-      html: `<pre class="content-stage__relay-text">${escapeHtml(documentHtml)}</pre>`,
+      srcDoc: `<!doctype html><html><body><pre class="content-stage__relay-text">${escapeHtml(documentHtml)}</pre></body></html>`,
       strippedScripts: 0
     };
   }
 
   const parser = new DOMParser();
   const parsed = parser.parseFromString(String(documentHtml ?? ""), "text/html");
-  let strippedScripts = 0;
-
-  parsed.querySelectorAll("script").forEach((node) => {
-    strippedScripts += 1;
-    node.remove();
-  });
-
-  parsed.querySelectorAll("iframe, frame, object, embed, form, input, button, textarea, select, base, meta[http-equiv]").forEach((node) => {
+  parsed.querySelectorAll("base, meta[http-equiv='content-security-policy'], meta[http-equiv='refresh']").forEach((node) => {
     node.remove();
   });
 
@@ -314,63 +438,44 @@ function sanitizeRelayedDocument(activeDocument) {
       const name = attribute.name.toLowerCase();
       const value = attribute.value;
 
-      if (name.startsWith("on")) {
+      if (name === "integrity" || name === "crossorigin") {
         element.removeAttribute(attribute.name);
         continue;
       }
 
-      if (name === "src" || name === "href") {
+      if (name === "src" || name === "href" || name === "poster" || (name === "data" && tagName === "object")) {
         if (/^\s*javascript:/iu.test(value)) {
           element.removeAttribute(attribute.name);
           continue;
         }
 
-        try {
-          const absoluteUrl = new URL(value, baseUrl).href;
-          if (tagName === "a" && name === "href") {
-            element.setAttribute("data-proxy-href", absoluteUrl);
-            element.setAttribute(attribute.name, absoluteUrl);
-            continue;
-          }
-
-          if (tagName === "link" && name === "href") {
-            const rel = String(element.getAttribute("rel") ?? "").toLowerCase();
-            if (rel.includes("stylesheet") || rel.includes("icon") || rel.includes("preload")) {
-              element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
-              continue;
-            }
-          }
-
-          if (name === "src") {
-            element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
-            continue;
-          }
-
-          element.setAttribute(attribute.name, absoluteUrl);
-        } catch {
+        const absoluteUrl = resolveProxyAbsoluteUrl(value, baseUrl);
+        if (!absoluteUrl) {
           element.removeAttribute(attribute.name);
+          continue;
         }
+
+        if (tagName === "a" && name === "href") {
+          element.setAttribute("data-opensky-href", absoluteUrl);
+          element.setAttribute(attribute.name, absoluteUrl);
+          continue;
+        }
+
+        if (tagName === "link" && name === "href") {
+          const rel = String(element.getAttribute("rel") ?? "").toLowerCase();
+          if (rel.includes("stylesheet") || rel.includes("icon") || rel.includes("preload") || rel.includes("manifest") || rel.includes("modulepreload")) {
+            element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
+          } else {
+            element.setAttribute(attribute.name, absoluteUrl);
+          }
+          continue;
+        }
+
+        element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
       }
 
       if (name === "srcset") {
-        const rewrittenSrcSet = value
-          .split(",")
-          .map((entry) => {
-            const [candidateUrl, descriptor] = entry.trim().split(/\s+/, 2);
-            if (!candidateUrl) {
-              return "";
-            }
-
-            try {
-              const absoluteUrl = new URL(candidateUrl, baseUrl).href;
-              const proxiedUrl = createBrowseResourceUrl(tabId, absoluteUrl);
-              return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
-            } catch {
-              return entry.trim();
-            }
-          })
-          .filter(Boolean)
-          .join(", ");
+        const rewrittenSrcSet = rewriteSrcSetValue(value, baseUrl, tabId);
 
         if (rewrittenSrcSet) {
           element.setAttribute(attribute.name, rewrittenSrcSet);
@@ -378,30 +483,45 @@ function sanitizeRelayedDocument(activeDocument) {
           element.removeAttribute(attribute.name);
         }
       }
+
+      if (tagName === "form" && name === "action") {
+        const absoluteUrl = resolveProxyAbsoluteUrl(value, baseUrl);
+        if (!absoluteUrl) {
+          element.removeAttribute(attribute.name);
+          continue;
+        }
+        element.setAttribute("data-opensky-action", absoluteUrl);
+        element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
+      }
     }
 
-    if (tagName === "a" && element.hasAttribute("data-proxy-href")) {
+    if (tagName === "a" && element.hasAttribute("data-opensky-href")) {
       element.setAttribute("target", "_self");
       element.setAttribute("rel", "nofollow");
     }
   });
 
-  const body = parsed.body ?? parsed.documentElement;
+  const runtimeScript = parsed.createElement("script");
+  runtimeScript.textContent = createRelayRuntimeScript(tabId, baseUrl);
+  const scriptMount = parsed.head ?? parsed.body ?? parsed.documentElement;
+  scriptMount.prepend(runtimeScript);
+
   return {
-    html: body.innerHTML,
-    strippedScripts
+    srcDoc: `<!doctype html>\n${parsed.documentElement?.outerHTML ?? "<html><body></body></html>"}`,
+    strippedScripts: 0
   };
 }
 
 function hydrateRelayedDocument(documentRef, activeDocument) {
-  const mountNode = documentRef?.querySelector?.("[data-relay-document]");
+  const frameNode = documentRef?.querySelector?.("[data-relay-frame]");
   const noteNode = documentRef?.querySelector?.("[data-relay-note]");
-  if (!mountNode) {
+  if (!frameNode) {
     return;
   }
 
   if (!activeDocument?.documentHtml) {
-    mountNode.innerHTML = "";
+    frameNode.srcdoc = "";
+    delete frameNode.dataset.relaySignature;
     if (noteNode) {
       noteNode.textContent = "";
     }
@@ -409,7 +529,12 @@ function hydrateRelayedDocument(documentRef, activeDocument) {
   }
 
   const sanitized = sanitizeRelayedDocument(activeDocument);
-  mountNode.innerHTML = sanitized.html;
+  const nextSignature = `${activeDocument.tabId ?? "tab"}:${activeDocument.finalUrl ?? ""}:${String(activeDocument.documentHtml ?? "").length}`;
+  if (frameNode.dataset.relaySignature !== nextSignature) {
+    frameNode.srcdoc = sanitized.srcDoc;
+    frameNode.dataset.relaySignature = nextSignature;
+  }
+
   if (noteNode) {
     const t = createTranslator(documentRef?.documentElement?.lang ?? "en");
     if (Array.isArray(activeDocument?.unsupportedHosts) && activeDocument.unsupportedHosts.length) {
@@ -417,9 +542,7 @@ function hydrateRelayedDocument(documentRef, activeDocument) {
         domains: activeDocument.unsupportedHosts.join(", ")
       });
     } else {
-      noteNode.textContent = sanitized.strippedScripts > 0
-        ? t("workspace.proxyScriptsDisabled")
-        : t("workspace.proxyResourceMode");
+      noteNode.textContent = t("workspace.proxyResourceMode");
     }
   }
 }
@@ -1279,12 +1402,16 @@ async function handleAction(store, action, targetElement, documentRef) {
   }
 }
 
-async function handleProxyDocumentClick(store, anchorElement) {
-  const nextUrl = String(anchorElement?.dataset?.proxyHref ?? "").trim();
+async function handleProxyFrameNavigate(store, nextUrl, tabId = null) {
+  const normalizedNextUrl = String(nextUrl ?? "").trim();
   const { activeProjectId, activeTabId } = store.getState();
   const t = getTranslator(store);
 
-  if (!nextUrl || !activeProjectId || !activeTabId) {
+  if (!normalizedNextUrl || !activeProjectId || !activeTabId) {
+    return;
+  }
+
+  if (tabId && tabId !== activeTabId) {
     return;
   }
 
@@ -1292,19 +1419,19 @@ async function handleProxyDocumentClick(store, anchorElement) {
     await browseNavigate({
       projectId: activeProjectId,
       tabId: activeTabId,
-      nextUrl
+      nextUrl: normalizedNextUrl
     });
     await refreshWorkspaceData(store, activeProjectId);
     store.setState((state) => ({
       ...state,
-      currentUrl: nextUrl,
+      currentUrl: normalizedNextUrl,
       statusMessage: t("status.tabNavigated")
     }));
   } catch (error) {
-    logFrontendIssue("proxy-document-click", error, {
+    logFrontendIssue("proxy-frame-navigate", error, {
       activeProjectId,
       activeTabId,
-      nextUrl
+      nextUrl: normalizedNextUrl
     });
     const displayError = describeUiError(error, store.getState().locale);
     pushBanner(store, {
@@ -1312,6 +1439,35 @@ async function handleProxyDocumentClick(store, anchorElement) {
       tone: "danger",
       title: displayError.title,
       message: displayError.message
+    });
+  }
+}
+
+async function handleProxyFrameMessage(store, event) {
+  const payload = event?.data;
+  if (!payload || typeof payload !== "object" || payload.source !== "opensky-proxy") {
+    return;
+  }
+
+  if (payload.type === "navigate") {
+    await handleProxyFrameNavigate(store, payload.nextUrl, payload.tabId ?? null);
+    return;
+  }
+
+  if (payload.type === "log") {
+    console.log("OpenSky proxy runtime", {
+      level: payload.level ?? "info",
+      scope: payload.scope ?? "iframe",
+      message: payload.message ?? "",
+      tabId: payload.tabId ?? null
+    });
+    return;
+  }
+
+  if (payload.type === "error") {
+    logFrontendIssue("proxy-runtime", new Error(payload.message ?? "Proxy runtime error"), {
+      code: payload.code ?? null,
+      tabId: payload.tabId ?? null
     });
   }
 }
@@ -1475,13 +1631,6 @@ export function bootApplication(documentRef = globalThis.document) {
       }));
     }
 
-    const proxyAnchor = event.target.closest("[data-proxy-href]");
-    if (proxyAnchor) {
-      event.preventDefault();
-      await handleProxyDocumentClick(store, proxyAnchor);
-      return;
-    }
-
     const button = event.target.closest("[data-action]");
     if (!button) {
       return;
@@ -1489,6 +1638,10 @@ export function bootApplication(documentRef = globalThis.document) {
 
     event.preventDefault();
     await handleAction(store, button.dataset.action, button, documentRef);
+  });
+
+  globalThis.addEventListener?.("message", async (event) => {
+    await handleProxyFrameMessage(store, event);
   });
 
   documentRef?.addEventListener?.("fullscreenchange", () => {

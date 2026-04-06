@@ -11,6 +11,19 @@ export function createSite(payload) {
   });
 }
 
+export function updateSite(siteId, payload) {
+  return requestJson(`/v1/sites/${siteId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteSite(siteId) {
+  return requestJson(`/v1/sites/${siteId}`, {
+    method: "DELETE"
+  });
+}
+
 export function fetchProjects() {
   return requestJson("/v1/projects", { method: "GET" });
 }

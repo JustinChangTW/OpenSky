@@ -46,7 +46,7 @@ function buildCorsHeaders(origin, context) {
     ...headers,
     "access-control-allow-origin": allowedOrigin,
     "access-control-allow-credentials": "true",
-    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS",
     "access-control-allow-headers": "content-type,x-opensky-session,accept-language",
     "access-control-max-age": "600"
   };

@@ -377,6 +377,95 @@ test("browse resource proxies css through the backend and rewrites nested asset 
   assert.match(cssText, new RegExp(encodeURIComponent("https://google.com/img/hero.png")));
 });
 
+test("browse resource proxies non-GET API calls through backend relay", async (t) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "opensky-proxy-api-"));
+  const persistPath = path.join(tempDir, "state.json");
+  const upstreamRequests = [];
+
+  t.after(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  const client = createTestClient({
+    persistPath,
+    fetchImpl: async (url, init = {}) => {
+      const bodyText = init.body ? Buffer.from(init.body).toString("utf8") : "";
+      upstreamRequests.push({
+        url: String(url),
+        method: String(init.method ?? "GET").toUpperCase(),
+        bodyText,
+        contentType: init.headers?.["content-type"] ?? init.headers?.get?.("content-type") ?? ""
+      });
+
+      return new Response(JSON.stringify({
+        ok: true,
+        echoedMethod: String(init.method ?? "GET").toUpperCase(),
+        echoedBody: bodyText
+      }), {
+        status: 201,
+        headers: {
+          "content-type": "application/json; charset=utf-8"
+        }
+      });
+    }
+  });
+
+  const session = await signIn(client);
+  const siteResponse = await client.request("/v1/sites", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-opensky-session": session.token
+    },
+    body: JSON.stringify({
+      displayName: "API Host",
+      baseDomains: ["example.com"],
+      pathRules: ["/"],
+      defaultRenderMode: "allowlist-proxy-phase1",
+      loginPersistenceAllowed: true,
+      downloadAllowed: true,
+      uploadAllowed: true
+    })
+  });
+  const site = await siteResponse.json();
+  const project = await createProject(client, session.token);
+
+  const openResponse = await client.request("/v1/browse/open", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-opensky-session": session.token
+    },
+    body: JSON.stringify({
+      projectId: project.projectId,
+      siteId: site.siteId,
+      entryUrl: "https://example.com/"
+    })
+  });
+  const openedTab = await openResponse.json();
+
+  const relayResponse = await client.request(`/v1/browse/resource?tabId=${openedTab.tabId}&resourceUrl=${encodeURIComponent("https://example.com/api/search")}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-opensky-session": session.token
+    },
+    body: JSON.stringify({
+      keyword: "proxy"
+    })
+  });
+  const relayPayload = await relayResponse.json();
+
+  assert.equal(relayResponse.status, 201);
+  assert.equal(upstreamRequests.length, 1);
+  assert.equal(upstreamRequests[0].url, "https://example.com/api/search");
+  assert.equal(upstreamRequests[0].method, "POST");
+  assert.match(upstreamRequests[0].contentType, /application\/json/);
+  assert.match(upstreamRequests[0].bodyText, /"keyword":"proxy"/);
+  assert.equal(relayPayload.ok, true);
+  assert.equal(relayPayload.echoedMethod, "POST");
+});
+
 test("browse content reports cross-domain assets that still need allowlist coverage", async (t) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "opensky-proxy-warning-"));
   const persistPath = path.join(tempDir, "state.json");
@@ -398,6 +487,7 @@ test("browse content reports cross-domain assets that still need allowlist cover
           <link rel="stylesheet" href="https://fonts.example.net/site.css">
         </head>
         <body>
+          <a href="https://github.com/mdn/content">Reference link</a>
           <img src="https://cdn.example.net/logo.png" alt="logo" />
         </body>
       </html>
@@ -454,6 +544,7 @@ test("browse content reports cross-domain assets that still need allowlist cover
   assert.deepEqual(payload.unsupportedHosts, ["cdn.example.net", "fonts.example.net"]);
   assert.match(payload.warningMessage, /cdn\.example\.net/);
   assert.match(payload.warningMessage, /fonts\.example\.net/);
+  assert.doesNotMatch(payload.warningMessage, /github\.com/);
 
   const logText = await fs.readFile(logPath, "utf8");
   assert.match(logText, /Proxy Phase 1 detected cross-domain assets outside the allowlist/);

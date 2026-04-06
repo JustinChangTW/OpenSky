@@ -405,8 +405,15 @@ function createContentStage(layout, data, t, locale) {
                     <p>${escapeHtml(data.activeDocument.errorMessage)}</p>
                   </div>
                 ` : `
-                  <div class="content-stage__document" data-relay-document>
-                    <div class="content-stage__document-loading">${t("workspace.relayLoading")}</div>
+                  <div class="content-stage__document content-stage__document--frame">
+                    <iframe
+                      class="content-stage__document-frame"
+                      title="${escapeHtml(activeTabTitle)}"
+                      data-relay-frame
+                      sandbox="allow-scripts allow-forms allow-same-origin allow-downloads"
+                      referrerpolicy="no-referrer"
+                      loading="eager"
+                    >${t("workspace.relayLoading")}</iframe>
                   </div>
                   <div class="content-stage__document-note" data-relay-note>${t("workspace.proxyResourceMode")}</div>
                 `}

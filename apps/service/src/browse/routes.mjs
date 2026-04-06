@@ -8,6 +8,73 @@ import { derivePageTitle, getRecord, withRoute, writeAudit, writeRecord } from "
 
 const RELAY_USER_AGENT = "OpenSkyRelay/1.0";
 const DEMO_ORIGIN_HOST = "demo.opensky.local";
+const FORWARDED_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-language",
+  "accept-encoding",
+  "cache-control",
+  "content-type",
+  "if-none-match",
+  "if-modified-since",
+  "range",
+  "x-requested-with",
+  "x-csrf-token",
+  "x-xsrf-token"
+]);
+const BLOCKED_RESPONSE_HEADERS = new Set([
+  "connection",
+  "content-encoding",
+  "content-length",
+  "content-security-policy",
+  "content-security-policy-report-only",
+  "set-cookie",
+  "set-cookie2",
+  "transfer-encoding",
+  "x-frame-options"
+]);
+
+function shouldIncludeRequestBody(method = "GET") {
+  const normalizedMethod = String(method).toUpperCase();
+  return normalizedMethod !== "GET" && normalizedMethod !== "HEAD";
+}
+
+function createRelayRequestHeaders(incomingHeaders, cookieHeader) {
+  const headers = {
+    "user-agent": RELAY_USER_AGENT
+  };
+  const normalizedIncomingHeaders = incomingHeaders instanceof Headers
+    ? incomingHeaders
+    : new Headers(incomingHeaders ?? {});
+
+  for (const [headerName, headerValue] of normalizedIncomingHeaders.entries()) {
+    const normalizedHeaderName = String(headerName).toLowerCase();
+    if (!FORWARDED_REQUEST_HEADERS.has(normalizedHeaderName)) {
+      continue;
+    }
+    headers[normalizedHeaderName] = headerValue;
+  }
+
+  if (cookieHeader) {
+    headers.cookie = cookieHeader;
+  }
+
+  return headers;
+}
+
+function toProxyResponseHeaders(response) {
+  const headers = {};
+  response.headers.forEach((value, key) => {
+    const normalizedKey = String(key).toLowerCase();
+    if (BLOCKED_RESPONSE_HEADERS.has(normalizedKey)) {
+      return;
+    }
+    headers[normalizedKey] = value;
+  });
+  if (!headers["cache-control"]) {
+    headers["cache-control"] = "private, max-age=60";
+  }
+  return headers;
+}
 
 function createDemoOriginResponse(targetUrl) {
   const parsedUrl = new URL(targetUrl);
@@ -257,7 +324,7 @@ function rewriteCssContent(cssText, baseUrl, tabId) {
 
 function collectUnsupportedResourceHosts(documentHtml, baseUrl, site) {
   const hosts = new Set();
-  const urlPattern = /\b(?:src|href)\s*=\s*["']([^"']+)["']|\b(?:srcset)\s*=\s*["']([^"']+)["']/giu;
+  const html = String(documentHtml ?? "");
   const cssPattern = /url\(([^)]+)\)|@import\s+(?:url\()?["']?([^"')\s]+)["']?\)?/giu;
 
   const tryAddUrl = (candidate) => {
@@ -276,43 +343,68 @@ function collectUnsupportedResourceHosts(documentHtml, baseUrl, site) {
     }
   };
 
-  for (const match of String(documentHtml ?? "").matchAll(urlPattern)) {
-    if (match[1]) {
-      tryAddUrl(match[1]);
-    }
-    if (match[2]) {
-      for (const entry of match[2].split(",")) {
-        const [candidateUrl] = entry.trim().split(/\s+/, 1);
-        tryAddUrl(candidateUrl);
+  const resourceTagPatterns = [
+    /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<img\b[^>]*\bsrcset\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<source\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<source\b[^>]*\bsrcset\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<video\b[^>]*\bposter\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<link\b[^>]*\brel\s*=\s*["'][^"']*(?:stylesheet|preload|modulepreload|icon|apple-touch-icon|mask-icon|manifest)[^"']*["'][^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/giu,
+    /<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*\brel\s*=\s*["'][^"']*(?:stylesheet|preload|modulepreload|icon|apple-touch-icon|mask-icon|manifest)[^"']*["'][^>]*>/giu
+  ];
+
+  for (const pattern of resourceTagPatterns) {
+    for (const match of html.matchAll(pattern)) {
+      if (!match[1]) {
+        continue;
       }
+      if (/srcset/iu.test(pattern.source)) {
+        for (const entry of match[1].split(",")) {
+          const [candidateUrl] = entry.trim().split(/\s+/, 1);
+          tryAddUrl(candidateUrl);
+        }
+        continue;
+      }
+      tryAddUrl(match[1]);
     }
   }
 
-  for (const match of String(documentHtml ?? "").matchAll(cssPattern)) {
+  for (const match of html.matchAll(cssPattern)) {
     tryAddUrl(match[1] ?? match[2]);
   }
 
   return [...hosts].sort();
 }
 
-async function fetchRelayResponse(currentUrl, site, context, traceId, scope = "browse-relay", scopeRef = { siteId: site.siteId, projectId: null }) {
+async function fetchRelayResponse(
+  currentUrl,
+  site,
+  context,
+  traceId,
+  scope = "browse-relay",
+  scopeRef = { siteId: site.siteId, projectId: null },
+  requestOptions = {}
+) {
   if (new URL(currentUrl).hostname.toLowerCase() === DEMO_ORIGIN_HOST) {
     return createDemoOriginResponse(currentUrl);
   }
 
+  const method = String(requestOptions.method ?? "GET").toUpperCase();
+  const requestBody = shouldIncludeRequestBody(method) ? requestOptions.body : undefined;
   const cookieHeader = await context.relayCookieJar?.getCookieHeader?.(scopeRef, currentUrl);
-  const requestHeaders = {
-    "user-agent": RELAY_USER_AGENT
+  const requestHeaders = createRelayRequestHeaders(requestOptions.headers, cookieHeader);
+  const fetchOptions = {
+    method,
+    redirect: requestOptions.redirect ?? "follow",
+    headers: requestHeaders
   };
-  if (cookieHeader) {
-    requestHeaders.cookie = cookieHeader;
+  if (requestBody !== undefined) {
+    fetchOptions.body = requestBody;
+    fetchOptions.duplex = "half";
   }
 
-  const response = await context.fetch(currentUrl, {
-    method: "GET",
-    redirect: "follow",
-    headers: requestHeaders
-  }).catch(async (error) => {
+  const response = await context.fetch(currentUrl, fetchOptions).catch(async (error) => {
     await context.logger?.write?.({
       level: "error",
       scope,
@@ -343,10 +435,23 @@ async function fetchRelayResponse(currentUrl, site, context, traceId, scope = "b
 }
 
 async function fetchRelayDocument(currentUrl, tabId, site, projectId, context, traceId) {
-  const response = await fetchRelayResponse(currentUrl, site, context, traceId, "browse-relay", {
-    siteId: site.siteId,
-    projectId: projectId ?? null
-  });
+  const response = await fetchRelayResponse(
+    currentUrl,
+    site,
+    context,
+    traceId,
+    "browse-relay",
+    {
+      siteId: site.siteId,
+      projectId: projectId ?? null
+    },
+    {
+      method: "GET",
+      headers: {
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    }
+  );
   const finalUrl = response.url || currentUrl;
   assertUrlAllowed(finalUrl, site, traceId);
 
@@ -484,38 +589,65 @@ export function registerBrowseRoutes(router) {
     });
   }));
 
-  router.add("GET", "/v1/browse/resource", withRoute(async ({ context, url, traceId }) => {
-    const tabId = requireString(url.searchParams.get("tabId"), "tabId");
-    const resourceUrl = requireString(url.searchParams.get("resourceUrl"), "resourceUrl");
-    const tab = await getRecord(context, "tabs", tabId, ERROR_CODES.TAB_NOT_FOUND, traceId, "Tab");
-    const site = await getRecord(context, "sites", tab.siteId, ERROR_CODES.SITE_NOT_FOUND, traceId, "Site");
+  const proxyResourceMethods = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
+  for (const method of proxyResourceMethods) {
+    router.add(method, "/v1/browse/resource", withRoute(async ({ request, context, url, traceId }) => {
+      const tabId = requireString(url.searchParams.get("tabId"), "tabId");
+      const resourceUrl = requireString(url.searchParams.get("resourceUrl"), "resourceUrl");
+      const tab = await getRecord(context, "tabs", tabId, ERROR_CODES.TAB_NOT_FOUND, traceId, "Tab");
+      const site = await getRecord(context, "sites", tab.siteId, ERROR_CODES.SITE_NOT_FOUND, traceId, "Site");
+      const requestMethod = String(request.method ?? "GET").toUpperCase();
+      const requestBody = shouldIncludeRequestBody(requestMethod)
+        ? await request.arrayBuffer()
+        : undefined;
 
-    assertResourceUrlAllowed(resourceUrl, site, traceId);
-    const response = await fetchRelayResponse(resourceUrl, site, context, traceId, "browse-resource", {
-      siteId: site.siteId,
-      projectId: tab.projectId ?? null
-    });
-    const finalUrl = response.url || resourceUrl;
-    assertResourceUrlAllowed(finalUrl, site, traceId);
+      assertResourceUrlAllowed(resourceUrl, site, traceId);
+      const response = await fetchRelayResponse(
+        resourceUrl,
+        site,
+        context,
+        traceId,
+        "browse-resource",
+        {
+          siteId: site.siteId,
+          projectId: tab.projectId ?? null
+        },
+        {
+          method: requestMethod,
+          headers: request.headers,
+          body: requestBody && requestBody.byteLength > 0 ? requestBody : undefined
+        }
+      );
+      const finalUrl = response.url || resourceUrl;
+      assertResourceUrlAllowed(finalUrl, site, traceId);
 
-    const contentType = String(response.headers.get("content-type") ?? "application/octet-stream");
-    const baseHeaders = {
-      "content-type": contentType,
-      "cache-control": response.headers.get("cache-control") ?? "private, max-age=60"
-    };
+      const contentType = String(response.headers.get("content-type") ?? "application/octet-stream");
+      const baseHeaders = {
+        ...toProxyResponseHeaders(response),
+        "content-type": contentType,
+        "x-opensky-relay-url": finalUrl
+      };
 
-    if (contentType.includes("text/css")) {
-      const cssText = await response.text();
-      const rewrittenCss = rewriteCssContent(cssText, finalUrl, tab.tabId);
-      return new Response(rewrittenCss, {
+      if (requestMethod === "HEAD") {
+        return new Response(null, {
+          status: response.status,
+          headers: baseHeaders
+        });
+      }
+
+      if (contentType.includes("text/css")) {
+        const cssText = await response.text();
+        const rewrittenCss = rewriteCssContent(cssText, finalUrl, tab.tabId);
+        return new Response(rewrittenCss, {
+          status: response.status,
+          headers: baseHeaders
+        });
+      }
+
+      return new Response(await response.arrayBuffer(), {
         status: response.status,
         headers: baseHeaders
       });
-    }
-
-    return new Response(await response.arrayBuffer(), {
-      status: response.status,
-      headers: baseHeaders
-    });
-  }));
+    }));
+  }
 }
