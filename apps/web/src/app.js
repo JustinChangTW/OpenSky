@@ -153,6 +153,36 @@ function matchesPathRule(pathname, pathRules = []) {
   });
 }
 
+function createFatalStartupMarkup(error) {
+  const message = escapeHtml(error?.message ?? String(error ?? "Unknown startup error"));
+  const stack = escapeHtml(error?.stack ?? "");
+  return `
+    <main class="auth-shell">
+      <section class="auth-card">
+        <p class="eyebrow">OpenSky startup</p>
+        <h1>Startup failed</h1>
+        <p class="auth-card__lede">OpenSky failed during frontend boot. Check the message below and browser console.</p>
+        <div class="banner banner--danger">
+          <div>
+            <strong>Runtime error</strong>
+            <p>${message}</p>
+            ${stack ? `<pre class="content-stage__relay-text">${stack}</pre>` : ""}
+          </div>
+        </div>
+      </section>
+    </main>
+  `;
+}
+
+function renderFatalStartupError(documentRef, error) {
+  logFrontendIssue("boot-fatal", error);
+  const mountNode = documentRef?.getElementById?.("app");
+  if (!mountNode) {
+    return;
+  }
+  mountNode.innerHTML = createFatalStartupMarkup(error);
+}
+
 function findMatchingSiteForUrl(targetUrl, sites = []) {
   let parsedUrl;
   try {
@@ -1473,25 +1503,30 @@ async function handleProxyFrameMessage(store, event) {
 }
 
 export function bootApplication(documentRef = globalThis.document) {
-  const mountNode = documentRef?.getElementById?.("app");
-  if (!mountNode) {
-    return;
-  }
+  try {
+    const mountNode = documentRef?.getElementById?.("app");
+    if (!mountNode) {
+      return;
+    }
 
-  const store = createStore(createInitialState());
+    const store = createStore(createInitialState());
 
-  function render() {
-    setLocaleOnDocument(documentRef, store.getState().locale);
-    mountNode.innerHTML = renderApp(store.getState());
-    hydrateRelayedDocument(documentRef, store.getState().activeDocument);
-  }
+    function render() {
+      try {
+        setLocaleOnDocument(documentRef, store.getState().locale);
+        mountNode.innerHTML = renderApp(store.getState());
+        hydrateRelayedDocument(documentRef, store.getState().activeDocument);
+      } catch (error) {
+        renderFatalStartupError(documentRef, error);
+      }
+    }
 
-  store.subscribe(render);
-  render();
-  refreshServiceInfo(store);
-  refreshSession(store);
+    store.subscribe(render);
+    render();
+    refreshServiceInfo(store);
+    refreshSession(store);
 
-  mountNode.addEventListener("submit", async (event) => {
+    mountNode.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-sign-in-form]");
     if (form) {
       event.preventDefault();
@@ -1620,9 +1655,9 @@ export function bootApplication(documentRef = globalThis.document) {
         message: displayError.message
       });
     }
-  });
+    });
 
-  mountNode.addEventListener("click", async (event) => {
+    mountNode.addEventListener("click", async (event) => {
     const menuRoot = event.target.closest?.("[data-browser-menu-root]");
     if (store.getState().settingsMenuOpen && !menuRoot) {
       store.setState((state) => ({
@@ -1638,13 +1673,13 @@ export function bootApplication(documentRef = globalThis.document) {
 
     event.preventDefault();
     await handleAction(store, button.dataset.action, button, documentRef);
-  });
+    });
 
-  globalThis.addEventListener?.("message", async (event) => {
-    await handleProxyFrameMessage(store, event);
-  });
+    globalThis.addEventListener?.("message", async (event) => {
+      await handleProxyFrameMessage(store, event);
+    });
 
-  documentRef?.addEventListener?.("fullscreenchange", () => {
+    documentRef?.addEventListener?.("fullscreenchange", () => {
     const state = store.getState();
     if (!documentRef?.fullscreenElement && state.layout.viewMode === "fullscreen") {
       store.setState((currentState) => ({
@@ -1658,15 +1693,18 @@ export function bootApplication(documentRef = globalThis.document) {
         logFrontendIssue("persist-layout-after-fullscreenchange", error);
       });
     }
-  });
+    });
 
-  globalThis.addEventListener?.("error", (event) => {
-    logFrontendIssue("window-error", event?.error ?? event?.message ?? "Unknown window error");
-  });
+    globalThis.addEventListener?.("error", (event) => {
+      logFrontendIssue("window-error", event?.error ?? event?.message ?? "Unknown window error");
+    });
 
-  globalThis.addEventListener?.("unhandledrejection", (event) => {
-    logFrontendIssue("unhandled-rejection", event?.reason ?? "Unhandled promise rejection");
-  });
+    globalThis.addEventListener?.("unhandledrejection", (event) => {
+      logFrontendIssue("unhandled-rejection", event?.reason ?? "Unhandled promise rejection");
+    });
+  } catch (error) {
+    renderFatalStartupError(documentRef, error);
+  }
 }
 
 if (typeof window !== "undefined" && typeof document !== "undefined") {

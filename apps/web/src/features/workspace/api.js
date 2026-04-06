@@ -1,5 +1,9 @@
 import { requestJson } from "../auth/session.js";
 
+function encodeResourceId(value) {
+  return encodeURIComponent(String(value ?? "").trim());
+}
+
 export function fetchSites() {
   return requestJson("/v1/sites", { method: "GET" });
 }
@@ -12,16 +16,14 @@ export function createSite(payload) {
 }
 
 export function updateSite(siteId, payload) {
-  return requestJson(`/v1/sites/${siteId}`, {
+  return requestJson(`/v1/sites/${encodeResourceId(siteId)}`, {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
 }
 
 export function deleteSite(siteId) {
-  return requestJson(`/v1/sites/${siteId}`, {
-    method: "DELETE"
-  });
+  return requestJson(`/v1/sites/${encodeResourceId(siteId)}`, { method: "DELETE" });
 }
 
 export function fetchProjects() {
@@ -35,11 +37,15 @@ export function createProject(payload) {
   });
 }
 
+export function deleteProject(projectId) {
+  return requestJson(`/v1/projects/${encodeResourceId(projectId)}`, { method: "DELETE" });
+}
+
 export function fetchTabs(projectId) {
   if (!projectId) {
     return Promise.resolve({ items: [] });
   }
-  return requestJson(`/v1/projects/${projectId}/tabs`, { method: "GET" });
+  return requestJson(`/v1/projects/${encodeResourceId(projectId)}/tabs`, { method: "GET" });
 }
 
 export function fetchBookmarks(projectId) {
@@ -54,6 +60,10 @@ export function createBookmark(payload) {
   });
 }
 
+export function deleteBookmark(bookmarkId) {
+  return requestJson(`/v1/bookmarks/${encodeResourceId(bookmarkId)}`, { method: "DELETE" });
+}
+
 export function fetchNotes(projectId) {
   const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
   return requestJson(`/v1/notes${suffix}`, { method: "GET" });
@@ -66,6 +76,10 @@ export function createNote(payload) {
   });
 }
 
+export function deleteNote(noteId) {
+  return requestJson(`/v1/notes/${encodeResourceId(noteId)}`, { method: "DELETE" });
+}
+
 export function fetchLayoutPreference(projectId) {
   const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
   return requestJson(`/v1/layout-preferences${suffix}`, { method: "GET" });
@@ -73,7 +87,7 @@ export function fetchLayoutPreference(projectId) {
 
 export function saveLayoutPreference(payload, layoutPreferenceId = null) {
   if (layoutPreferenceId) {
-    return requestJson(`/v1/layout-preferences/${layoutPreferenceId}`, {
+    return requestJson(`/v1/layout-preferences/${encodeResourceId(layoutPreferenceId)}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
     });
