@@ -50,6 +50,12 @@ function createFetchMock(routeMap) {
             prototypeStage: "demoable-minimal-prototype",
             browsingMode: "allowlist-based remote browsing / controlled relay",
             primaryActions: ["Select site", "Open", "Maximize", "Back to workspace"],
+            demoPreset: {
+              shortcuts: [
+                { id: "demo-example", label: "Example.com", url: "https://example.com/" },
+                { id: "demo-mdn", label: "MDN zh-TW", url: "https://developer.mozilla.org/zh-TW/" }
+              ]
+            },
             routes: {
               health: "/health",
               info: "/v1/info"
@@ -173,6 +179,189 @@ test("bootApplication restores global layout preference into the top settings tr
       items: []
     }]
   ]);
+  const { mountNode, documentRef, clickAction } = createDocumentHarness();
+
+  globalThis.localStorage = storage;
+  globalThis.fetch = createFetchMock(routes);
+
+  try {
+    bootApplication(documentRef);
+    await waitFor(() => mountNode.innerHTML.includes("Open URL"));
+
+    assert.match(mountNode.innerHTML, /workspace-shell--standard/);
+    assert.doesNotMatch(mountNode.innerHTML, /workspace-settings workspace-settings--/);
+    assert.match(mountNode.innerHTML, /workspace-topbar workspace-topbar--compact/);
+    assert.match(mountNode.innerHTML, /workspace-bottombar workspace-bottombar--collapsed/);
+
+    const persistedLayout = JSON.parse(storage.getItem("opensky.layout"));
+    assert.equal(persistedLayout.viewMode, "standard");
+    assert.equal(persistedLayout.leftPanelState, "collapsed");
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.localStorage = originalStorage;
+  }
+});
+
+test("signed-in shell shows direct demo shortcuts without requiring settings input first", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalStorage = globalThis.localStorage;
+  const storage = createStorage({
+    "opensky.session-token": "session_demo"
+  });
+  let opened = false;
+  const routes = new Map([
+    ["GET /v1/me", { signedIn: true, actorId: "owner_admin", displayName: "Owner Admin", token: "session_demo" }],
+    ["GET /v1/sites", { items: [{ siteId: "site_demo_example", displayName: "Example", baseDomains: ["example.com"], pathRules: ["/"] }] }],
+    ["GET /v1/projects", { items: [{ projectId: "project_demo", name: "Demo Workspace", status: "active", defaultSiteId: "site_demo_example" }] }],
+    ["GET /v1/session-vault", { items: [] }],
+    ["GET /v1/audit", { items: [] }],
+    ["GET /v1/projects/project_demo/tabs", () => ({
+      items: opened
+        ? [{
+            tabId: "tab_demo",
+            projectId: "project_demo",
+            siteId: "site_demo_example",
+            currentUrl: "https://example.com/",
+            pageTitle: "Example Domain",
+            status: "open"
+          }]
+        : []
+    })],
+    ["GET /v1/bookmarks?projectId=project_demo", { items: [] }],
+    ["GET /v1/notes?projectId=project_demo", { items: [] }],
+    ["GET /v1/layout-preferences?projectId=project_demo", {
+      precedence: ["project", "global", "system-default"],
+      resolvedPreference: {
+        layoutPreferenceId: "layout_project_demo",
+        scope: "project",
+        projectId: "project_demo",
+        leftPanelState: "hidden",
+        rightPanelState: "hidden",
+        topBarState: "autoHide",
+        bottomBarState: "hidden",
+        viewMode: "maximized",
+        focusMode: "off",
+        contentZoomRatio: 1
+      },
+      items: []
+    }],
+    ["POST /v1/browse/open", () => {
+      opened = true;
+      return {
+        tabId: "tab_demo",
+        projectId: "project_demo",
+        siteId: "site_demo_example",
+        currentUrl: "https://example.com/",
+        pageTitle: "Example Domain",
+        status: "open"
+      };
+    }],
+    ["GET /v1/browse/content?tabId=tab_demo", {
+      tabId: "tab_demo",
+      requestedUrl: "https://example.com/",
+      finalUrl: "https://example.com/",
+      pageTitle: "Example Domain",
+      contentType: "text/html",
+      documentHtml: "<main><h1>Example Domain</h1></main>",
+      renderMode: "allowlist-proxy-phase1"
+    }]
+  ]);
+  const { mountNode, documentRef, clickAction } = createDocumentHarness();
+
+  globalThis.localStorage = storage;
+  globalThis.fetch = createFetchMock(routes);
+
+  try {
+    bootApplication(documentRef);
+    await waitFor(() => mountNode.innerHTML.includes("Example Domain"));
+
+    assert.match(mountNode.innerHTML, /value="https:\/\/example\.com\/"/);
+    assert.match(mountNode.innerHTML, /Navigate active tab/);
+    assert.match(mountNode.innerHTML, /data-action="toggle-settings-menu"/);
+
+    await clickAction("toggle-settings-menu");
+    await waitFor(() => mountNode.innerHTML.includes("browser-menu__panel"));
+    assert.match(mountNode.innerHTML, /data-browser-menu/);
+    assert.doesNotMatch(mountNode.innerHTML, /data-browser-menu[^>]*hidden/);
+
+    await clickAction("open-settings-page");
+    await waitFor(() => mountNode.innerHTML.includes("settings-page__sidebar"));
+    assert.match(mountNode.innerHTML, /workspace-main--settings-open/);
+    assert.match(mountNode.innerHTML, /settings-page__sidebar/);
+
+    await clickAction("close-settings-page");
+    await waitFor(() => !mountNode.innerHTML.includes("settings-page__sidebar"));
+    assert.doesNotMatch(mountNode.innerHTML, /workspace-main--settings-open/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.localStorage = originalStorage;
+  }
+});
+
+test("bootApplication auto-opens the verified real-site demo preset when it is available", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalStorage = globalThis.localStorage;
+  const storage = createStorage({
+    "opensky.session-token": "session_demo"
+  });
+  let opened = false;
+  const routes = new Map([
+    ["GET /v1/me", { signedIn: true, actorId: "owner_admin", displayName: "Owner Admin", token: "session_demo" }],
+    ["GET /v1/sites", { items: [{ siteId: "site_demo_example", displayName: "Example", baseDomains: ["example.com"], pathRules: ["/"] }] }],
+    ["GET /v1/projects", { items: [{ projectId: "project_demo", name: "Demo Workspace", status: "active", defaultSiteId: "site_demo_example" }] }],
+    ["GET /v1/session-vault", { items: [] }],
+    ["GET /v1/audit", { items: [] }],
+    ["GET /v1/bookmarks?projectId=project_demo", { items: [] }],
+    ["GET /v1/notes?projectId=project_demo", { items: [] }],
+    ["GET /v1/layout-preferences?projectId=project_demo", {
+      precedence: ["project", "global", "system-default"],
+      resolvedPreference: {
+        layoutPreferenceId: "layout_project_demo",
+        scope: "project",
+        projectId: "project_demo",
+        leftPanelState: "hidden",
+        rightPanelState: "hidden",
+        topBarState: "autoHide",
+        bottomBarState: "hidden",
+        viewMode: "maximized",
+        focusMode: "off",
+        contentZoomRatio: 1
+      },
+      items: []
+    }],
+    ["GET /v1/projects/project_demo/tabs", () => ({
+      items: opened
+        ? [{
+            tabId: "tab_demo",
+            projectId: "project_demo",
+            siteId: "site_demo_example",
+            currentUrl: "https://example.com/",
+            pageTitle: "Example Domain",
+            status: "open"
+          }]
+        : []
+    })],
+    ["POST /v1/browse/open", () => {
+      opened = true;
+      return {
+        tabId: "tab_demo",
+        projectId: "project_demo",
+        siteId: "site_demo_example",
+        currentUrl: "https://example.com/",
+        pageTitle: "Example Domain",
+        status: "open"
+      };
+    }],
+    ["GET /v1/browse/content?tabId=tab_demo", {
+      tabId: "tab_demo",
+      requestedUrl: "https://example.com/",
+      finalUrl: "https://example.com/",
+      pageTitle: "Example Domain",
+      contentType: "text/html",
+      documentHtml: "<main><h1>Example Domain</h1></main>",
+      renderMode: "allowlist-proxy-phase1"
+    }]
+  ]);
   const { mountNode, documentRef } = createDocumentHarness();
 
   globalThis.localStorage = storage;
@@ -180,17 +369,10 @@ test("bootApplication restores global layout preference into the top settings tr
 
   try {
     bootApplication(documentRef);
-    await waitFor(() => mountNode.innerHTML.includes("Owner Admin"));
+    await waitFor(() => mountNode.innerHTML.includes("Example Domain"));
 
-    assert.match(mountNode.innerHTML, /workspace-shell--standard/);
-    assert.match(mountNode.innerHTML, /workspace-settings workspace-settings--compact/);
-    assert.match(mountNode.innerHTML, /workspace-settings__pane--left workspace-settings__pane--collapsed/);
-    assert.match(mountNode.innerHTML, /workspace-topbar workspace-topbar--compact/);
-    assert.match(mountNode.innerHTML, /workspace-bottombar workspace-bottombar--collapsed/);
-
-    const persistedLayout = JSON.parse(storage.getItem("opensky.layout"));
-    assert.equal(persistedLayout.viewMode, "standard");
-    assert.equal(persistedLayout.leftPanelState, "collapsed");
+    assert.match(mountNode.innerHTML, /https:\/\/example\.com\//);
+    assert.match(mountNode.innerHTML, /Example Domain/);
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.localStorage = originalStorage;
@@ -267,8 +449,7 @@ test("project switch reloads project-scoped layout preference into the top setti
     await waitFor(() => mountNode.innerHTML.includes("Secondary"));
 
     assert.match(mountNode.innerHTML, /workspace-shell--maximized/);
-    assert.match(mountNode.innerHTML, /workspace-settings workspace-settings--expanded/);
-    assert.match(mountNode.innerHTML, /workspace-settings__pane--right workspace-settings__pane--expanded/);
+    assert.doesNotMatch(mountNode.innerHTML, /workspace-settings workspace-settings--/);
     assert.match(mountNode.innerHTML, /workspace-topbar workspace-topbar--expanded/);
     assert.match(mountNode.innerHTML, /workspace-bottombar workspace-bottombar--hidden/);
   } finally {
@@ -357,12 +538,12 @@ test("refresh-workspace keeps the selected active tab instead of jumping back to
     await waitFor(() => mountNode.innerHTML.includes("Example - one"));
 
     await clickAction("select-tab", { tabId: "tab_2" });
-    await waitFor(() => /tab-chip is-active" data-action="select-tab" data-tab-id="tab_2"/.test(mountNode.innerHTML));
+    await waitFor(() => /tab-chip[^"]*is-active" data-action="select-tab" data-tab-id="tab_2"/.test(mountNode.innerHTML));
 
     await clickAction("refresh-workspace");
     await waitFor(() => mountNode.innerHTML.includes("https://example.com/two"));
 
-    assert.match(mountNode.innerHTML, /tab-chip is-active" data-action="select-tab" data-tab-id="tab_2"/);
+    assert.match(mountNode.innerHTML, /tab-chip[^"]*is-active" data-action="select-tab" data-tab-id="tab_2"/);
     assert.match(mountNode.innerHTML, /value="https:\/\/example\.com\/two"/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -449,8 +630,8 @@ test("workspace selection is restored from local storage on boot", async () => {
 
   try {
     bootApplication(documentRef);
-    await waitFor(() => mountNode.innerHTML.includes("Secondary"));
-    assert.match(mountNode.innerHTML, /tab-chip is-active" data-action="select-tab" data-tab-id="tab_2"/);
+    await waitFor(() => mountNode.innerHTML.includes("https://example.com/two"));
+    assert.match(mountNode.innerHTML, /tab-chip[^"]*is-active" data-action="select-tab" data-tab-id="tab_2"/);
     assert.match(mountNode.innerHTML, /value="https:\/\/example\.com\/two"/);
   } finally {
     globalThis.fetch = originalFetch;

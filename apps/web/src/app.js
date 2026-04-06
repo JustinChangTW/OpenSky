@@ -19,6 +19,7 @@ import { createSessionVault, fetchSessionVault, updateSessionVault } from "./fea
 import { createTranslator, describeUiError, loadLocale, saveLocale } from "./i18n-runtime.js";
 import {
   createBookmark,
+  deleteSite,
   createNote,
   createProject,
   createSite,
@@ -28,11 +29,12 @@ import {
   fetchProjects,
   fetchSites,
   fetchTabs,
-  saveLayoutPreference
+  saveLayoutPreference,
+  updateSite
 } from "./features/workspace/api.js";
 import { normalizeSiteDraft } from "./features/workspace/site-input.js";
 import { clearWorkspaceUiState, loadWorkspaceUiState, saveWorkspaceUiState } from "./features/workspace/storage.js";
-import { createWorkspaceShellMarkup } from "./features/workspace/view.js";
+import { createWorkspaceShellMarkup } from "./features/workspace/view-browser.js";
 import { escapeHtml } from "./components/ui.js";
 
 function logFrontendIssue(scope, error, extra = {}) {
@@ -55,6 +57,9 @@ function createInitialState() {
     serviceStatus: "loading",
     serviceInfo: null,
     sessionStatus: "loading",
+    workspaceStatus: "idle",
+    settingsTrayOpen: false,
+    settingsMenuOpen: false,
     session: null,
     layout: mergeLayoutState(createDefaultLayoutState(), loadLayoutState() ?? {}),
     banners: [],
@@ -75,6 +80,20 @@ function createInitialState() {
     lastTransfer: null,
     activeDocument: null
   };
+}
+
+function createWorkspaceBootMarkup(state) {
+  const t = createTranslator(state.locale);
+  return `
+    <main class="workspace-boot-shell">
+      <section class="workspace-boot-card">
+        <p class="eyebrow">${t("workspace.proxyEyebrow")}</p>
+        <h1>${t("workspace.proxyTitle")}</h1>
+        <p class="workspace-status">${escapeHtml(state.statusMessage)}</p>
+        ${createServiceInfoMarkup(state)}
+      </section>
+    </main>
+  `;
 }
 
 function createStore(initialState) {
@@ -111,12 +130,90 @@ function normalizeItems(payload) {
 function pushBanner(store, banner) {
   store.setState((state) => ({
     ...state,
-    banners: [banner, ...state.banners].slice(0, 4)
+    banners: [
+      banner,
+      ...state.banners.filter((item) => !(
+        item.tone === banner.tone
+        && item.title === banner.title
+        && item.message === banner.message
+      ))
+    ].slice(0, 4)
   }));
+}
+
+function matchesPathRule(pathname, pathRules = []) {
+  const rules = Array.isArray(pathRules) && pathRules.length ? pathRules : ["/"];
+  return rules.some((rule) => {
+    const normalizedRule = String(rule ?? "/").trim() || "/";
+    if (normalizedRule === "/") {
+      return true;
+    }
+    const compactRule = normalizedRule.replace(/\/+$/u, "");
+    return pathname === normalizedRule || pathname === compactRule || pathname.startsWith(`${compactRule}/`);
+  });
+}
+
+function findMatchingSiteForUrl(targetUrl, sites = []) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(String(targetUrl ?? "").trim());
+  } catch {
+    return null;
+  }
+
+  const hostname = parsedUrl.hostname.toLowerCase();
+  const pathname = parsedUrl.pathname || "/";
+
+  return sites.find((site) => {
+    const baseDomains = Array.isArray(site.baseDomains) ? site.baseDomains : [];
+    const domainMatches = baseDomains.some((domain) => {
+      const normalizedDomain = String(domain ?? "").trim().toLowerCase();
+      return normalizedDomain && (hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`));
+    });
+    return domainMatches && matchesPathRule(pathname, site.pathRules);
+  }) ?? null;
+}
+
+function isLegacyDemoSite(site) {
+  const baseDomains = Array.isArray(site?.baseDomains) ? site.baseDomains : [];
+  return (
+    site?.siteId === "site_demo"
+    || site?.displayName === "OpenSky Demo"
+    || baseDomains.some((domain) => String(domain ?? "").trim().toLowerCase() === "demo.opensky.local")
+  );
 }
 
 function getTranslator(store) {
   return createTranslator(store.getState().locale);
+}
+
+async function ensureDemoAutoReady(store) {
+  const state = store.getState();
+  if (state.activeTabId || state.tabs.length) {
+    return;
+  }
+
+  const demoProject = state.projects.find((project) => project.projectId === "project_demo") ?? null;
+  const demoSite = state.sites.find((site) => site.siteId === "site_demo_example") ?? null;
+  const verifiedEntryUrl = state.serviceInfo?.demoPreset?.verifiedEntryUrl ?? "https://example.com/";
+
+  if (!demoProject || !demoSite) {
+    return;
+  }
+
+  await browseOpen({
+    projectId: demoProject.projectId,
+    siteId: demoSite.siteId,
+    entryUrl: verifiedEntryUrl
+  });
+
+  await refreshWorkspaceData(store, demoProject.projectId);
+  store.setState((currentState) => ({
+    ...currentState,
+    activeProjectId: demoProject.projectId,
+    activeSiteId: demoSite.siteId,
+    currentUrl: verifiedEntryUrl
+  }));
 }
 
 function createServiceInfoMarkup(state) {
@@ -334,6 +431,85 @@ function dismissBanner(store, id) {
   }));
 }
 
+async function openUrlInWorkspace(store, rawUrl, mode = "auto") {
+  const targetUrl = String(rawUrl ?? "").trim();
+  const t = getTranslator(store);
+  const state = store.getState();
+
+  if (!targetUrl) {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "warning",
+      title: t("banner.missingWorkspaceContext"),
+      message: t("banner.missingUrlOnly")
+    });
+    return;
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(targetUrl);
+  } catch {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "danger",
+      title: t("banner.invalidUrlTitle"),
+      message: t("banner.invalidUrlMessage")
+    });
+    return;
+  }
+
+  const matchedSite = findMatchingSiteForUrl(parsedUrl.href, state.sites);
+  if (!matchedSite) {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "warning",
+      title: t("banner.urlNotConfiguredTitle"),
+      message: t("banner.urlNotConfiguredMessage", {
+        host: parsedUrl.hostname
+      })
+    });
+    return;
+  }
+
+  const projectId = state.activeProjectId ?? state.projects[0]?.projectId ?? null;
+  if (!projectId) {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "warning",
+      title: t("banner.missingWorkspaceContext"),
+      message: t("banner.missingProjectOnly")
+    });
+    return;
+  }
+
+  const shouldNavigate = (mode === "navigate" || mode === "auto") && Boolean(state.activeTabId) && state.activeSiteId === matchedSite.siteId;
+
+  if (shouldNavigate) {
+    await browseNavigate({
+      projectId,
+      tabId: state.activeTabId,
+      nextUrl: parsedUrl.href
+    });
+  } else {
+    await browseOpen({
+      projectId,
+      siteId: matchedSite.siteId,
+      entryUrl: parsedUrl.href
+    });
+  }
+
+  await refreshWorkspaceData(store, projectId);
+  store.setState((currentState) => ({
+    ...currentState,
+    settingsTrayOpen: false,
+    activeProjectId: projectId,
+    activeSiteId: matchedSite.siteId,
+    currentUrl: parsedUrl.href,
+    statusMessage: shouldNavigate ? t("status.tabNavigated") : t("status.controlledTabOpened")
+  }));
+}
+
 async function persistLayoutPreference(store) {
   const state = store.getState();
   if (state.sessionStatus !== "signed_in") {
@@ -368,13 +544,27 @@ async function refreshWorkspaceData(store, projectId = null) {
     fetchAuditLog().catch(() => ({ items: [] }))
   ]);
 
-  const sites = normalizeItems(sitesPayload);
+  const sites = normalizeItems(sitesPayload).filter((site) => !isLegacyDemoSite(site));
   const projects = normalizeItems(projectsPayload);
   const vaultItems = normalizeItems(vaultPayload);
   const auditItems = normalizeItems(auditPayload);
-  const activeProjectId = projectId ?? previousState.activeProjectId ?? projects[0]?.projectId ?? null;
+  const storedProjectId = projects.some((item) => item.projectId === previousState.activeProjectId)
+    ? previousState.activeProjectId
+    : null;
+  const activeProjectId = projectId
+    ?? storedProjectId
+    ?? projects.find((item) => item.projectId === "project_demo")?.projectId
+    ?? projects[0]?.projectId
+    ?? null;
   const activeProject = projects.find((item) => item.projectId === activeProjectId) ?? null;
-  const activeSiteId = previousState.activeSiteId ?? activeProject?.defaultSiteId ?? sites[0]?.siteId ?? null;
+  const storedSiteId = sites.some((item) => item.siteId === previousState.activeSiteId)
+    ? previousState.activeSiteId
+    : null;
+  const activeSiteId = storedSiteId
+    ?? activeProject?.defaultSiteId
+    ?? sites.find((item) => item.siteId === "site_demo_example")?.siteId
+    ?? sites[0]?.siteId
+    ?? null;
   const [tabsPayload, bookmarksPayload, notesPayload] = activeProjectId
     ? await Promise.all([
         fetchTabs(activeProjectId).catch(() => ({ items: [] })),
@@ -382,7 +572,7 @@ async function refreshWorkspaceData(store, projectId = null) {
         fetchNotes(activeProjectId).catch(() => ({ items: [] }))
       ])
     : [{ items: [] }, { items: [] }, { items: [] }];
-  const tabs = normalizeItems(tabsPayload);
+  const tabs = normalizeItems(tabsPayload).filter((tab) => !["closed", "deleted"].includes(String(tab?.status ?? "")));
   const bookmarks = normalizeItems(bookmarksPayload);
   const notes = normalizeItems(notesPayload);
   const resolvedLayout = await fetchLayoutPreference(activeProjectId ?? undefined).catch(() => null);
@@ -456,12 +646,16 @@ async function refreshWorkspaceData(store, projectId = null) {
 
 function renderApp(state) {
   if (state.sessionStatus === "signed_in") {
+    if (state.workspaceStatus === "loading") {
+      return createWorkspaceBootMarkup(state);
+    }
+
     return createWorkspaceShellMarkup({
       locale: state.locale,
       layout: state.layout,
       session: state.session,
       statusMessage: state.statusMessage,
-      bannerMarkup: createBannerMarkup(state.banners, state.locale),
+      bannerMarkup: createBannerMarkup(state.banners.slice(0, 1), state.locale),
       workspace: {
         sites: state.sites,
         projects: state.projects,
@@ -484,7 +678,9 @@ function renderApp(state) {
         statusMessage: state.statusMessage,
         activeDocument: state.activeDocument,
         serviceInfo: state.serviceInfo,
-        serviceStatus: state.serviceStatus
+        serviceStatus: state.serviceStatus,
+        settingsTrayOpen: state.settingsTrayOpen,
+        settingsMenuOpen: state.settingsMenuOpen
       }
     });
   }
@@ -524,6 +720,9 @@ async function refreshSession(store) {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
+        workspaceStatus: "idle",
+        settingsTrayOpen: false,
+        settingsMenuOpen: false,
         session: null,
         statusMessage: t("status.signInToOpen")
       }));
@@ -533,10 +732,19 @@ async function refreshSession(store) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_in",
+      workspaceStatus: "loading",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session,
-      statusMessage: t("status.workspaceRestored")
+      statusMessage: t("service.loadingMessage")
     }));
     await refreshWorkspaceData(store);
+    await ensureDemoAutoReady(store);
+    store.setState((state) => ({
+      ...state,
+      workspaceStatus: "ready",
+      statusMessage: t("status.workspaceRestored")
+    }));
   } catch (error) {
     logFrontendIssue("refresh-session", error);
     const errorCode = error?.payload?.code;
@@ -544,6 +752,9 @@ async function refreshSession(store) {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
+        workspaceStatus: "idle",
+        settingsTrayOpen: false,
+        settingsMenuOpen: false,
         session: null,
         statusMessage: t("status.signInToOpen")
       }));
@@ -560,6 +771,9 @@ async function refreshSession(store) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_out",
+      workspaceStatus: "idle",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session: null,
       statusMessage: t("status.backendUnavailable")
     }));
@@ -575,6 +789,7 @@ async function handleSignInSubmit(store, formElement) {
   store.setState((state) => ({
     ...state,
     sessionStatus: "loading",
+    workspaceStatus: "idle",
     statusMessage: t("status.signingIn")
   }));
 
@@ -583,10 +798,19 @@ async function handleSignInSubmit(store, formElement) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_in",
+      workspaceStatus: "loading",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session,
-      statusMessage: t("status.signedIn")
+      statusMessage: t("service.loadingMessage")
     }));
     await refreshWorkspaceData(store);
+    await ensureDemoAutoReady(store);
+    store.setState((state) => ({
+      ...state,
+      workspaceStatus: "ready",
+      statusMessage: t("status.signedIn")
+    }));
   } catch (error) {
     logFrontendIssue("sign-in", error, { username });
     const displayError = describeUiError(error, store.getState().locale);
@@ -599,6 +823,9 @@ async function handleSignInSubmit(store, formElement) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_out",
+      workspaceStatus: "idle",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session: null,
       statusMessage: t("status.signInToContinue")
     }));
@@ -608,6 +835,13 @@ async function handleSignInSubmit(store, formElement) {
 async function handleAction(store, action, targetElement, documentRef) {
   const t = getTranslator(store);
   try {
+    if (action !== "toggle-settings-menu" && store.getState().settingsMenuOpen) {
+      store.setState((state) => ({
+        ...state,
+        settingsMenuOpen: false
+      }));
+    }
+
     if (action === "dismiss-banner") {
       dismissBanner(store, targetElement.dataset.bannerId);
       return;
@@ -623,15 +857,39 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "toggle-settings-menu") {
+      store.setState((state) => ({
+        ...state,
+        settingsMenuOpen: !state.settingsMenuOpen
+      }));
+      return;
+    }
+
+    if (action === "open-settings-page") {
+      store.setState((state) => ({
+        ...state,
+        settingsTrayOpen: true,
+        settingsMenuOpen: false,
+        statusMessage: t("status.workspaceOverview")
+      }));
+      return;
+    }
+
+    if (action === "close-settings-page") {
+      store.setState((state) => ({
+        ...state,
+        settingsTrayOpen: false,
+        settingsMenuOpen: false
+      }));
+      return;
+    }
+
     if (action === "toggle-settings-tray") {
       store.setState((state) => ({
         ...state,
-        layout: {
-          ...state.layout,
-          topBarState: state.layout.topBarState === "expanded" ? "hidden" : "expanded"
-        }
+        settingsTrayOpen: !state.settingsTrayOpen,
+        settingsMenuOpen: false
       }));
-      await persistLayoutPreference(store);
       return;
     }
 
@@ -640,6 +898,9 @@ async function handleAction(store, action, targetElement, documentRef) {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
+        workspaceStatus: "idle",
+        settingsTrayOpen: false,
+        settingsMenuOpen: false,
         session: null,
         sites: [],
         projects: [],
@@ -717,10 +978,11 @@ async function handleAction(store, action, targetElement, documentRef) {
     }
 
     if (action === "enter-fullscreen") {
-      const contentStage = documentRef.getElementById("content-stage");
+      const fullscreenTarget = documentRef.getElementById("app")
+        ?? documentRef.getElementById("content-stage");
       const result = await requestFullscreenWithFallback({
         documentRef,
-        targetElement: contentStage,
+        targetElement: fullscreenTarget,
         layout: store.getState().layout,
         locale: store.getState().locale
       });
@@ -733,6 +995,24 @@ async function handleAction(store, action, targetElement, documentRef) {
       if (result.banner) {
         pushBanner(store, result.banner);
       }
+      await persistLayoutPreference(store);
+      return;
+    }
+
+    if (action === "exit-fullscreen") {
+      try {
+        await documentRef?.exitFullscreen?.();
+      } catch (error) {
+        logFrontendIssue("exit-fullscreen", error);
+      }
+
+      store.setState((state) => ({
+        ...state,
+        layout: reduceLayoutState(state.layout, {
+          type: "set-view-mode",
+          viewMode: "maximized"
+        })
+      }));
       await persistLayoutPreference(store);
       return;
     }
@@ -750,11 +1030,81 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "edit-site") {
+      const state = store.getState();
+      const siteId = targetElement.dataset.siteId;
+      const site = state.sites.find((item) => item.siteId === siteId);
+      if (!site) {
+        return;
+      }
+
+      const isZh = String(state.locale).startsWith("zh");
+      const displayName = globalThis.prompt?.(
+        isZh ? "網站名稱" : "Site name",
+        site.displayName ?? ""
+      );
+      if (displayName == null) {
+        return;
+      }
+
+      const baseDomain = globalThis.prompt?.(
+        isZh ? "白名單網域（用逗號分隔）" : "Allowlisted base domains (comma separated)",
+        Array.isArray(site.baseDomains) ? site.baseDomains.join(", ") : ""
+      );
+      if (baseDomain == null) {
+        return;
+      }
+
+      const pathRule = globalThis.prompt?.(
+        isZh ? "路徑規則（例如 / 或 /team）" : "Path rule (for example / or /team)",
+        Array.isArray(site.pathRules) ? (site.pathRules[0] ?? "/") : "/"
+      );
+      if (pathRule == null) {
+        return;
+      }
+
+      const normalizedSite = normalizeSiteDraft({
+        displayName,
+        baseDomain,
+        pathRule
+      });
+
+      await updateSite(siteId, normalizedSite.payload);
+      await refreshWorkspaceData(store, state.activeProjectId);
+      store.setState((currentState) => ({
+        ...currentState,
+        activeSiteId: siteId
+      }));
+      return;
+    }
+
+    if (action === "delete-site") {
+      const state = store.getState();
+      const siteId = targetElement.dataset.siteId;
+      const site = state.sites.find((item) => item.siteId === siteId);
+      if (!site) {
+        return;
+      }
+
+      const isZh = String(state.locale).startsWith("zh");
+      const confirmed = globalThis.confirm
+        ? globalThis.confirm(isZh ? `刪除網站「${site.displayName}」？` : `Delete site "${site.displayName}"?`)
+        : true;
+      if (!confirmed) {
+        return;
+      }
+
+      await deleteSite(siteId);
+      await refreshWorkspaceData(store, state.activeProjectId);
+      return;
+    }
+
     if (action === "select-tab") {
       store.setState((state) => {
         const activeTab = state.tabs.find((tab) => tab.tabId === targetElement.dataset.tabId);
         return {
           ...state,
+          settingsTrayOpen: false,
           activeTabId: targetElement.dataset.tabId,
           currentUrl: activeTab?.currentUrl ?? state.currentUrl
         };
@@ -789,10 +1139,16 @@ async function handleAction(store, action, targetElement, documentRef) {
       await refreshWorkspaceData(store, projectId);
       store.setState((currentState) => ({
         ...currentState,
+        settingsTrayOpen: false,
         activeSiteId: site.siteId,
         currentUrl: entryUrl,
         statusMessage: t("status.controlledTabOpened")
       }));
+      return;
+    }
+
+    if (action === "open-demo-url") {
+      await openUrlInWorkspace(store, String(targetElement.dataset.url ?? ""), "open");
       return;
     }
 
@@ -804,6 +1160,7 @@ async function handleAction(store, action, targetElement, documentRef) {
     if (action === "back-to-workspace") {
       store.setState((state) => ({
         ...state,
+        settingsTrayOpen: false,
         activeTabId: null,
         currentUrl: "",
         activeDocument: null,
@@ -814,38 +1171,7 @@ async function handleAction(store, action, targetElement, documentRef) {
 
     if (action === "browse-open" || action === "browse-navigate") {
       const currentUrl = String(documentRef.querySelector("[data-url-input]")?.value ?? "").trim();
-      const { activeProjectId, activeSiteId, activeTabId } = store.getState();
-
-      if (!activeProjectId || !activeSiteId || !currentUrl) {
-        pushBanner(store, {
-          id: crypto.randomUUID(),
-          tone: "warning",
-          title: t("banner.missingWorkspaceContext"),
-          message: t("banner.missingProjectSiteUrl")
-        });
-        return;
-      }
-
-      if (action === "browse-open") {
-        await browseOpen({
-          projectId: activeProjectId,
-          siteId: activeSiteId,
-          entryUrl: currentUrl
-        });
-      } else if (activeTabId) {
-        await browseNavigate({
-          projectId: activeProjectId,
-          tabId: activeTabId,
-          nextUrl: currentUrl
-        });
-      }
-
-      await refreshWorkspaceData(store, activeProjectId);
-      store.setState((state) => ({
-        ...state,
-        currentUrl,
-        statusMessage: action === "browse-open" ? t("status.controlledTabOpened") : t("status.tabNavigated")
-      }));
+      await openUrlInWorkspace(store, currentUrl, action === "browse-navigate" ? "navigate" : "open");
       return;
     }
 
@@ -1101,6 +1427,11 @@ export function bootApplication(documentRef = globalThis.document) {
         }));
       }
 
+      if (workspaceForm.dataset.form === "quick-open") {
+        await openUrlInWorkspace(store, String(formData.get("targetUrl") ?? ""), "auto");
+        return;
+      }
+
       if (workspaceForm.dataset.form === "navigate-tab" && state.activeProjectId && state.activeTabId) {
         const nextUrl = String(formData.get("nextUrl") ?? "").trim();
         if (nextUrl) {
@@ -1136,6 +1467,14 @@ export function bootApplication(documentRef = globalThis.document) {
   });
 
   mountNode.addEventListener("click", async (event) => {
+    const menuRoot = event.target.closest?.("[data-browser-menu-root]");
+    if (store.getState().settingsMenuOpen && !menuRoot) {
+      store.setState((state) => ({
+        ...state,
+        settingsMenuOpen: false
+      }));
+    }
+
     const proxyAnchor = event.target.closest("[data-proxy-href]");
     if (proxyAnchor) {
       event.preventDefault();
@@ -1150,6 +1489,22 @@ export function bootApplication(documentRef = globalThis.document) {
 
     event.preventDefault();
     await handleAction(store, button.dataset.action, button, documentRef);
+  });
+
+  documentRef?.addEventListener?.("fullscreenchange", () => {
+    const state = store.getState();
+    if (!documentRef?.fullscreenElement && state.layout.viewMode === "fullscreen") {
+      store.setState((currentState) => ({
+        ...currentState,
+        layout: reduceLayoutState(currentState.layout, {
+          type: "set-view-mode",
+          viewMode: "maximized"
+        })
+      }));
+      persistLayoutPreference(store).catch((error) => {
+        logFrontendIssue("persist-layout-after-fullscreenchange", error);
+      });
+    }
   });
 
   globalThis.addEventListener?.("error", (event) => {

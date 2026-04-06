@@ -1,9 +1,9 @@
 ﻿import test from "node:test";
 import assert from "node:assert/strict";
 import { createDefaultLayoutState } from "../src/features/layout/state.js";
-import { createWorkspaceShellMarkup } from "../src/features/workspace/view.js";
+import { createWorkspaceShellMarkup } from "../src/features/workspace/view-browser.js";
 
-test("workspace shell accepts app workspace state shape and renders the top settings tray", () => {
+test("workspace shell accepts app workspace state shape and renders browser menu with settings tab", () => {
   const markup = createWorkspaceShellMarkup({
     locale: "zh",
     layout: {
@@ -32,36 +32,86 @@ test("workspace shell accepts app workspace state shape and renders the top sett
       transferItemId: null,
       lastTransfer: null,
       statusMessage: "Workspace restored.",
+      settingsTrayOpen: true,
+      settingsMenuOpen: true,
       serviceStatus: "ready",
       serviceInfo: {
         environment: "development",
-        persistenceMode: "memory"
+        persistenceMode: "memory",
+        demoPreset: {
+          shortcuts: [
+            { id: "demo-example", label: "Example.com", url: "https://example.com/" },
+            { id: "demo-mdn", label: "MDN zh-TW", url: "https://developer.mozilla.org/zh-TW/" }
+          ]
+        }
       }
     }
   });
 
-  assert.match(markup, /Owner Admin/);
-  assert.match(markup, /工作區設定/);
-  assert.match(markup, /開啟已選網站/);
-  assert.match(markup, /允許路徑更新/);
-  assert.match(markup, /導向目前分頁/);
-  assert.match(markup, /切換設定/);
+  assert.match(markup, /workspace-main--settings-open/);
+  assert.match(markup, /settings-page/);
+  assert.match(markup, /browser-menu__panel/);
+  assert.match(markup, /data-action="toggle-settings-menu"/);
   assert.match(markup, /最大化/);
   assert.match(markup, /回到工作區/);
-  assert.match(markup, /目前白名單網址/);
-  assert.match(markup, /主要流程/);
-  assert.match(markup, /開啟目前已選網站/);
-  assert.match(markup, /Backend 已連線/);
+  assert.match(markup, /開啟網址|Open URL/);
+  assert.match(markup, /Direct tests/);
+  assert.match(markup, /Example\.com/);
+  assert.match(markup, /MDN zh-TW/);
+  assert.match(markup, /data-action="edit-site"/);
+  assert.match(markup, /data-action="delete-site"/);
   assert.match(markup, /可填一個或多個白名單網域/);
   assert.match(markup, /路徑規則只填路徑/);
   assert.match(markup, /新網站目前預設啟用工作階段記住、上傳與下載/);
+  assert.match(markup, /data-form="quick-open"/);
+  assert.match(markup, /workspace-topbar__urlbar/);
   assert.doesNotMatch(markup, /工作階段<\/label>/);
   assert.doesNotMatch(markup, /上傳<\/label>/);
   assert.doesNotMatch(markup, /下載<\/label>/);
-  assert.match(markup, /workspace-settings workspace-settings--expanded/);
-  assert.match(markup, /workspace-settings__grid workspace-settings__grid--expanded/);
+  assert.match(markup, /settings-page__sidebar/);
+  assert.match(markup, /settings-page__content/);
   assert.doesNotMatch(markup, /workspace-panel/);
   assert.doesNotMatch(markup, /<iframe/);
-  assert.doesNotMatch(markup, /Open URL/);
   assert.doesNotMatch(markup, /undefined/);
+});
+
+test("fullscreen shell exposes exit-fullscreen action", () => {
+  const markup = createWorkspaceShellMarkup({
+    locale: "en",
+    layout: {
+      ...createDefaultLayoutState(),
+      viewMode: "fullscreen",
+      topBarState: "compact",
+      bottomBarState: "hidden"
+    },
+    session: { displayName: "Owner Admin" },
+    statusMessage: "Workspace restored.",
+    bannerMarkup: "",
+    workspace: {
+      sites: [],
+      projects: [],
+      tabs: [],
+      bookmarks: [],
+      notes: [],
+      vaultItems: [],
+      auditItems: [],
+      activeProjectId: null,
+      activeSiteId: null,
+      activeTabId: null,
+      activeProject: null,
+      activeSite: null,
+      currentUrl: "",
+      activeDocument: null,
+      transferItemId: null,
+      lastTransfer: null,
+      statusMessage: "Workspace restored.",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
+      serviceStatus: "ready",
+      serviceInfo: null
+    }
+  });
+
+  assert.match(markup, /data-action="exit-fullscreen"/);
+  assert.doesNotMatch(markup, /data-action="enter-fullscreen"/);
 });

@@ -166,25 +166,77 @@ npm run dev:web
 
 現在系統在開發 / 測試環境下，若資料庫是空的，會自動 seed 一組我已驗證可正常呈現的 preset：
 
-- `site`: `OpenSky Demo`
+- `site`: `Example`
 - `project`: `Demo Workspace`
-- `verified entry URL`: `https://demo.opensky.local/`
-- `verified secondary URL`: `https://demo.opensky.local/status`
+- `verified entry URL`: `https://example.com/`
+- `verified secondary URL`: `https://developer.mozilla.org/zh-TW/`
 
 這組 preset 的特性：
 
-- 不依賴外網
-- 不依賴第三方網站
-- 由 backend 內建 demo origin 提供內容
-- 可完整經過目前的 controlled relay 顯示
+- 使用真實可連線網站
+- 一開即可直接點測，不必先手動新增設定
+- 符合目前 allowlist 驗證流程
+- 可快速驗證受控 relay 是否正常
 
 所以在全新狀態下，你登入後應該可以直接：
 
-1. 看見 `OpenSky Demo`
-2. 看見 `Demo Workspace`
-3. 直接按 `開啟已選網站`
+1. 看見 `Demo Workspace`
+2. 在中央輸入框下方看到 3 個可直接點的測試按鈕
+3. 系統會優先自動開啟 `https://example.com/`
+4. 你也可以直接點其他測試按鈕切換
+
+目前內建的 direct test shortcuts：
+
+- `Example.com` -> `https://example.com/`
+- `MDN zh-TW` -> `https://developer.mozilla.org/zh-TW/`
+
+另外，開發環境下系統也會自動補齊這些 demo sites：
+
+- `Example`
+- `MDN Docs`
 
 如果你要先驗證系統本身，而不是驗證外站相容性，請優先用這組 preset。
+
+### Verified Real-Site Demo Example: MDN
+
+如果你要驗證「真實網站是否能透過目前的受控轉發原型正常顯示」，目前我已實測可用的範例是：
+
+- target URL: `https://developer.mozilla.org/zh-TW/`
+
+建議設定如下：
+
+- `網站名稱`: `MDN`
+- `base domain`: `developer.mozilla.org, transcend-cdn.com`
+- `path rule`: `/zh-TW/`
+
+這組設定的實測結果：
+
+- `browse/open`: 成功
+- `browse/content`: 成功
+- final URL 一致
+- `<title>` 一致
+- 第一個 `<h1>` 一致
+- `unsupportedHosts`: `[]`
+
+你可以把它當成目前 repo 的「真實網站 demo 驗證範例」。
+
+最短測試流程：
+
+1. 啟 backend：`npm run start:service`
+2. 啟 frontend：`npm run dev:web`
+3. 登入 `owner-admin / opensky-demo`
+4. 建立一筆 site：
+   - `網站名稱`: `MDN`
+   - `base domain`: `developer.mozilla.org, transcend-cdn.com`
+   - `path rule`: `/zh-TW/`
+5. 建立或選擇一個 project
+6. 開啟：
+   - `https://developer.mozilla.org/zh-TW/`
+
+注意：
+
+- 這是目前已驗證可用的真實網站範例，不代表所有真實網站都已完整相容。
+- 對高度動態、anti-bot、SSO、複雜登入流程網站，仍可能只有部分可用。
 
 ### Prerequisites
 

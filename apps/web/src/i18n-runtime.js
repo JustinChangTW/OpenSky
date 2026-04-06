@@ -36,6 +36,12 @@ const UI_STRINGS = {
     "banner.missingWorkspaceContext": "Missing workspace context",
     "banner.missingProjectAndSite": "Choose a project and a site before opening a controlled tab.",
     "banner.missingProjectSiteUrl": "Choose a project, a site, and an allowlisted URL first.",
+    "banner.missingProjectOnly": "Create or select a project before opening a proxied page.",
+    "banner.missingUrlOnly": "Paste a URL first.",
+    "banner.invalidUrlTitle": "URL is not valid",
+    "banner.invalidUrlMessage": "Enter a full URL such as https://developer.mozilla.org/zh-TW/.",
+    "banner.urlNotConfiguredTitle": "This URL is not configured yet",
+    "banner.urlNotConfiguredMessage": "OpenSky cannot proxy {host} yet. Add that domain in settings first.",
     "banner.requestFailed": "Request failed",
     "banner.networkErrorTitle": "Network request failed",
     "banner.networkErrorMessage": "Could not reach the backend service. Check that the backend is running and OPEN_SKY_API_BASE points to the correct URL.",
@@ -94,6 +100,13 @@ const UI_STRINGS = {
     "workspace.noAudit": "No audit events yet.",
     "workspace.quickStartEyebrow": "Quick start",
     "workspace.quickStartTitle": "Primary workflow",
+    "workspace.proxyEyebrow": "Remote browsing",
+    "workspace.proxyTitle": "Open a controlled page",
+    "workspace.quickOpenReady": "Paste an allowlisted URL and OpenSky will match it to project {project} automatically.",
+    "workspace.quickOpenNeedsProject": "Create one project first, then paste an allowlisted URL here.",
+    "workspace.openUrlPrimary": "Open URL",
+    "workspace.demoShortcutsEyebrow": "Direct tests",
+    "workspace.demoShortcutsHint": "These verified shortcuts open immediately. No settings step is required.",
     "workspace.currentTabLabel": "Current tab",
     "workspace.workflowNeedSiteTitle": "Create your first allowlisted site",
     "workspace.workflowNeedSiteMessage": "Start by adding one site you trust. Use hostname only, then set the allowed path.",
@@ -114,14 +127,22 @@ const UI_STRINGS = {
     "workspace.standard": "Standard",
     "workspace.maximized": "Maximized",
     "workspace.fullscreen": "Fullscreen",
+    "workspace.exitFullscreen": "Exit fullscreen",
     "workspace.focus": "Focus",
     "workspace.topBar": "Top bar",
     "workspace.bottomBar": "Bottom bar",
     "workspace.settingsEyebrow": "Settings",
     "workspace.settingsTitle": "Workspace configuration",
     "workspace.settingsToggle": "Toggle settings",
+    "workspace.browserMenu": "⋯",
+    "workspace.openSettingsPage": "Settings",
+    "workspace.settingsTabTitle": "Settings",
+    "workspace.settingsTabSubtitle": "Browser-like settings page",
+    "workspace.close": "Close",
     "workspace.primarySettings": "Primary settings",
     "workspace.secondarySettings": "Secondary settings",
+    "workspace.editSite": "Edit",
+    "workspace.deleteSite": "Delete",
     "workspace.signOut": "Sign out",
     "workspace.maximizeAction": "Maximize",
     "workspace.backToWorkspace": "Back to workspace",
@@ -296,14 +317,22 @@ const UI_STRINGS = {
     "workspace.standard": "標準",
     "workspace.maximized": "最大化",
     "workspace.fullscreen": "全螢幕",
+    "workspace.exitFullscreen": "退出全螢幕",
     "workspace.focus": "專注模式",
     "workspace.topBar": "上方列",
     "workspace.bottomBar": "下方列",
     "workspace.settingsEyebrow": "設定",
     "workspace.settingsTitle": "工作區設定",
     "workspace.settingsToggle": "切換設定",
+    "workspace.browserMenu": "⋯",
+    "workspace.openSettingsPage": "設定",
+    "workspace.settingsTabTitle": "設定",
+    "workspace.settingsTabSubtitle": "瀏覽器風格設定頁",
+    "workspace.close": "關閉",
     "workspace.primarySettings": "主要設定",
     "workspace.secondarySettings": "次要設定",
+    "workspace.editSite": "編輯",
+    "workspace.deleteSite": "刪除",
     "workspace.signOut": "登出",
     "workspace.maximizeAction": "最大化",
     "workspace.backToWorkspace": "回到工作區",
@@ -364,6 +393,17 @@ const UI_STRINGS = {
     "enum.on": "開啟",
     "enum.off": "關閉",
     "enum.success": "成功"
+    ,"banner.missingProjectOnly": "請先建立或選擇一個專案，再開啟受控頁面。"
+    ,"banner.missingUrlOnly": "請先貼上網址。"
+    ,"banner.invalidUrlTitle": "網址格式不正確"
+    ,"banner.invalidUrlMessage": "請輸入完整網址，例如 https://developer.mozilla.org/zh-TW/。"
+    ,"banner.urlNotConfiguredTitle": "這個網址尚未設定"
+    ,"banner.urlNotConfiguredMessage": "OpenSky 目前還不能代理 {host}。請先在設定中加入對應網域。"
+    ,"workspace.proxyEyebrow": "遠端瀏覽"
+    ,"workspace.proxyTitle": "開啟受控頁面"
+    ,"workspace.quickOpenReady": "貼上一個已核准網址，OpenSky 會自動配對到專案 {project} 後開啟。"
+    ,"workspace.quickOpenNeedsProject": "請先建立一個專案，再把已核准網址貼到這裡。"
+    ,"workspace.openUrlPrimary": "開啟網址"
   }
 };
 
