@@ -62,7 +62,7 @@ export function reduceLayoutState(state, action) {
           viewMode: "fullscreen",
           leftPanelState: "hidden",
           rightPanelState: "hidden",
-          topBarState: "hidden",
+          topBarState: "compact",
           bottomBarState: "hidden"
         };
       }

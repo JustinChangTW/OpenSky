@@ -150,6 +150,7 @@ npm run dev:web
 - `專案名稱`: `Demo`
 
 7. 點 `開啟` 或 `開啟已選網站`
+8. 若網址尚未在白名單，直接點錯誤卡上的 `加入白名單並開啟`
 
 預期結果：
 
@@ -159,6 +160,7 @@ npm run dev:web
 - 可以建立 site / project
 - 可以開出受控 tab
 - 中央內容區至少會進入 proxy 文件視圖，而不是停在空白初始狀態
+- 白名單站點可直接 `開啟 / 編輯(網址+名稱) / 刪除`，不需要先做額外「選取」
 
 如果你只是要驗證「本機流程是否有跑起來」，先完成上面這 7 步，再去測較複雜的網站。
 
@@ -189,11 +191,15 @@ npm run dev:web
 
 - `Example.com` -> `https://example.com/`
 - `MDN zh-TW` -> `https://developer.mozilla.org/zh-TW/`
+- `IANA Reserved Domains` -> `https://www.iana.org/domains/reserved`
+- `ChatGPT Login` -> `https://chatgpt.com/auth/login`
 
 另外，開發環境下系統也會自動補齊這些 demo sites：
 
 - `Example`
 - `MDN Docs`
+- `IANA Reserved Domains`
+- `ChatGPT Login`
 
 如果你要先驗證系統本身，而不是驗證外站相容性，請優先用這組 preset。
 

@@ -19,6 +19,7 @@ import { createSessionVault, fetchSessionVault, updateSessionVault } from "./fea
 import { createTranslator, describeUiError, loadLocale, saveLocale } from "./i18n-runtime.js";
 import {
   createBookmark,
+  deleteSite,
   createNote,
   createProject,
   createSite,
@@ -28,11 +29,12 @@ import {
   fetchProjects,
   fetchSites,
   fetchTabs,
-  saveLayoutPreference
+  saveLayoutPreference,
+  updateSite
 } from "./features/workspace/api.js";
 import { normalizeSiteDraft } from "./features/workspace/site-input.js";
 import { clearWorkspaceUiState, loadWorkspaceUiState, saveWorkspaceUiState } from "./features/workspace/storage.js";
-import { createWorkspaceShellMarkup } from "./features/workspace/view.js";
+import { createWorkspaceShellMarkup } from "./features/workspace/view-browser.js";
 import { escapeHtml } from "./components/ui.js";
 
 function logFrontendIssue(scope, error, extra = {}) {
@@ -55,6 +57,9 @@ function createInitialState() {
     serviceStatus: "loading",
     serviceInfo: null,
     sessionStatus: "loading",
+    workspaceStatus: "idle",
+    settingsTrayOpen: false,
+    settingsMenuOpen: false,
     session: null,
     layout: mergeLayoutState(createDefaultLayoutState(), loadLayoutState() ?? {}),
     banners: [],
@@ -75,6 +80,20 @@ function createInitialState() {
     lastTransfer: null,
     activeDocument: null
   };
+}
+
+function createWorkspaceBootMarkup(state) {
+  const t = createTranslator(state.locale);
+  return `
+    <main class="workspace-boot-shell">
+      <section class="workspace-boot-card">
+        <p class="eyebrow">${t("workspace.proxyEyebrow")}</p>
+        <h1>${t("workspace.proxyTitle")}</h1>
+        <p class="workspace-status">${escapeHtml(state.statusMessage)}</p>
+        ${createServiceInfoMarkup(state)}
+      </section>
+    </main>
+  `;
 }
 
 function createStore(initialState) {
@@ -111,12 +130,120 @@ function normalizeItems(payload) {
 function pushBanner(store, banner) {
   store.setState((state) => ({
     ...state,
-    banners: [banner, ...state.banners].slice(0, 4)
+    banners: [
+      banner,
+      ...state.banners.filter((item) => !(
+        item.tone === banner.tone
+        && item.title === banner.title
+        && item.message === banner.message
+      ))
+    ].slice(0, 4)
   }));
+}
+
+function matchesPathRule(pathname, pathRules = []) {
+  const rules = Array.isArray(pathRules) && pathRules.length ? pathRules : ["/"];
+  return rules.some((rule) => {
+    const normalizedRule = String(rule ?? "/").trim() || "/";
+    if (normalizedRule === "/") {
+      return true;
+    }
+    const compactRule = normalizedRule.replace(/\/+$/u, "");
+    return pathname === normalizedRule || pathname === compactRule || pathname.startsWith(`${compactRule}/`);
+  });
+}
+
+function createFatalStartupMarkup(error) {
+  const message = escapeHtml(error?.message ?? String(error ?? "Unknown startup error"));
+  const stack = escapeHtml(error?.stack ?? "");
+  return `
+    <main class="auth-shell">
+      <section class="auth-card">
+        <p class="eyebrow">OpenSky startup</p>
+        <h1>Startup failed</h1>
+        <p class="auth-card__lede">OpenSky failed during frontend boot. Check the message below and browser console.</p>
+        <div class="banner banner--danger">
+          <div>
+            <strong>Runtime error</strong>
+            <p>${message}</p>
+            ${stack ? `<pre class="content-stage__relay-text">${stack}</pre>` : ""}
+          </div>
+        </div>
+      </section>
+    </main>
+  `;
+}
+
+function renderFatalStartupError(documentRef, error) {
+  logFrontendIssue("boot-fatal", error);
+  const mountNode = documentRef?.getElementById?.("app");
+  if (!mountNode) {
+    return;
+  }
+  mountNode.innerHTML = createFatalStartupMarkup(error);
+}
+
+function findMatchingSiteForUrl(targetUrl, sites = []) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(String(targetUrl ?? "").trim());
+  } catch {
+    return null;
+  }
+
+  const hostname = parsedUrl.hostname.toLowerCase();
+  const pathname = parsedUrl.pathname || "/";
+
+  return sites.find((site) => {
+    const baseDomains = Array.isArray(site.baseDomains) ? site.baseDomains : [];
+    const domainMatches = baseDomains.some((domain) => {
+      const normalizedDomain = String(domain ?? "").trim().toLowerCase();
+      return normalizedDomain && (hostname === normalizedDomain || hostname.endsWith(`.${normalizedDomain}`));
+    });
+    return domainMatches && matchesPathRule(pathname, site.pathRules);
+  }) ?? null;
+}
+
+function isLegacyDemoSite(site) {
+  const baseDomains = Array.isArray(site?.baseDomains) ? site.baseDomains : [];
+  return (
+    site?.siteId === "site_demo"
+    || site?.displayName === "OpenSky Demo"
+    || baseDomains.some((domain) => String(domain ?? "").trim().toLowerCase() === "demo.opensky.local")
+  );
 }
 
 function getTranslator(store) {
   return createTranslator(store.getState().locale);
+}
+
+async function ensureDemoAutoReady(store) {
+  const state = store.getState();
+  if (state.activeTabId || state.tabs.length) {
+    return;
+  }
+
+  const demoProject = state.projects.find((project) => project.projectId === "project_demo") ?? null;
+  const demoSite = state.sites.find((site) => site.siteId === "site_demo_example") ?? null;
+  const verifiedEntryUrl = state.serviceInfo?.demoPreset?.verifiedEntryUrl ?? "https://example.com/";
+
+  if (!demoProject || !demoSite) {
+    return;
+  }
+
+  await browseOpen({
+    projectId: demoProject.projectId,
+    siteId: demoSite.siteId,
+    entryUrl: verifiedEntryUrl
+  });
+
+  await refreshWorkspaceData(store, demoProject.projectId);
+  store.setState((currentState) => ({
+    ...currentState,
+    activeProjectId: demoProject.projectId,
+    activeSiteId: demoSite.siteId,
+    currentUrl: verifiedEntryUrl
+  }));
 }
 
 function createServiceInfoMarkup(state) {
@@ -184,26 +311,150 @@ function rewriteCssUrls(cssText, baseUrl, tabId) {
     });
 }
 
+function resolveProxyAbsoluteUrl(candidateUrl, baseUrl) {
+  const trimmedValue = String(candidateUrl ?? "").trim();
+  if (!trimmedValue || trimmedValue.startsWith("data:") || trimmedValue.startsWith("javascript:")) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmedValue, baseUrl).href;
+  } catch {
+    return null;
+  }
+}
+
+function rewriteSrcSetValue(srcSetValue, baseUrl, tabId) {
+  return String(srcSetValue ?? "")
+    .split(",")
+    .map((entry) => {
+      const [candidateUrl, descriptor] = entry.trim().split(/\s+/, 2);
+      const absoluteUrl = resolveProxyAbsoluteUrl(candidateUrl, baseUrl);
+      if (!absoluteUrl) {
+        return "";
+      }
+      const proxiedUrl = createBrowseResourceUrl(tabId, absoluteUrl);
+      return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+function createRelayRuntimeScript(tabId, baseUrl) {
+  const serializedTabId = JSON.stringify(String(tabId ?? ""));
+  const serializedBaseUrl = JSON.stringify(String(baseUrl ?? ""));
+
+  return [
+    "(function(){",
+    `const TAB_ID=${serializedTabId};`,
+    `const BASE_URL=${serializedBaseUrl};`,
+    "const MESSAGE_NS='opensky-proxy';",
+    "const toAbsolute=(value)=>{",
+    "  const raw=String(value??'').trim();",
+    "  if(!raw){return BASE_URL;}",
+    "  return new URL(raw, window.location.href.startsWith('about:') ? BASE_URL : window.location.href).href;",
+    "};",
+    "const toProxy=(targetUrl)=>`/v1/browse/resource?tabId=${encodeURIComponent(TAB_ID)}&resourceUrl=${encodeURIComponent(targetUrl)}`;",
+    "const notify=(type,payload={})=>{",
+    "  try{ window.parent?.postMessage?.({ source: MESSAGE_NS, type, tabId: TAB_ID, ...payload }, '*'); }catch{}",
+    "};",
+    "const nativeFetch=window.fetch?.bind(window);",
+    "if(nativeFetch){",
+    "  window.fetch=(input,init={})=>{",
+    "    const request=input instanceof Request ? input : null;",
+    "    const candidateUrl=request ? request.url : input;",
+    "    const absoluteUrl=toAbsolute(candidateUrl);",
+    "    const method=String(init.method ?? request?.method ?? 'GET').toUpperCase();",
+    "    const headers=new Headers(init.headers ?? request?.headers ?? {});",
+    "    const body=(init.body !== undefined) ? init.body : request?.body;",
+    "    return nativeFetch(toProxy(absoluteUrl), { ...init, method, headers, body, credentials: 'include' });",
+    "  };",
+    "}",
+    "if(window.XMLHttpRequest?.prototype){",
+    "  const nativeOpen=window.XMLHttpRequest.prototype.open;",
+    "  window.XMLHttpRequest.prototype.open=function(method,url,...rest){",
+    "    const absoluteUrl=toAbsolute(url);",
+    "    return nativeOpen.call(this, method, toProxy(absoluteUrl), ...rest);",
+    "  };",
+    "}",
+    "if(navigator?.sendBeacon){",
+    "  const nativeSendBeacon=navigator.sendBeacon.bind(navigator);",
+    "  navigator.sendBeacon=(url,data)=>nativeSendBeacon(toProxy(toAbsolute(url)), data);",
+    "}",
+    "if(window.EventSource){",
+    "  const NativeEventSource=window.EventSource;",
+    "  window.EventSource=function(url,config){",
+    "    return new NativeEventSource(toProxy(toAbsolute(url)), config);",
+    "  };",
+    "  window.EventSource.prototype=NativeEventSource.prototype;",
+    "}",
+    "if(window.WebSocket){",
+    "  window.WebSocket=function(url){",
+    "    const blockedUrl=toAbsolute(url);",
+    "    notify('error', { code: 'WEBSOCKET_UNSUPPORTED', message: `WebSocket is not supported in the OpenSky relay MVP: ${blockedUrl}` });",
+    "    throw new Error(`WebSocket is not supported in the OpenSky relay MVP: ${blockedUrl}`);",
+    "  };",
+    "}",
+    "if(window.open){",
+    "  const nativeOpen=window.open.bind(window);",
+    "  window.open=(url,target,features)=>nativeOpen(toProxy(toAbsolute(url || BASE_URL)), target, features);",
+    "}",
+    "try{",
+    "  const nativeAssign=window.location.assign.bind(window.location);",
+    "  const nativeReplace=window.location.replace.bind(window.location);",
+    "  window.location.assign=(url)=>notify('navigate', { nextUrl: toAbsolute(url) });",
+    "  window.location.replace=(url)=>notify('navigate', { nextUrl: toAbsolute(url) });",
+    "  void nativeAssign; void nativeReplace;",
+    "}catch{}",
+    "document.addEventListener('click',(event)=>{",
+    "  const anchor=event.target?.closest?.('a[href]');",
+    "  if(!anchor){return;}",
+    "  const href=String(anchor.getAttribute('href') ?? '').trim();",
+    "  if(!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')){return;}",
+    "  event.preventDefault();",
+    "  notify('navigate', { nextUrl: toAbsolute(href) });",
+    "});",
+    "document.addEventListener('submit',(event)=>{",
+    "  const form=event.target;",
+    "  if(!(form instanceof HTMLFormElement)){return;}",
+    "  const method=String(form.getAttribute('method') ?? 'GET').toUpperCase();",
+    "  const action=toAbsolute(form.getAttribute('action') || BASE_URL);",
+    "  if(method==='GET'){",
+    "    event.preventDefault();",
+    "    const nextUrl=new URL(action);",
+    "    const formData=new FormData(form);",
+    "    for(const [name,value] of formData.entries()){",
+    "      nextUrl.searchParams.append(name, String(value));",
+    "    }",
+    "    notify('navigate', { nextUrl: nextUrl.href });",
+    "    return;",
+    "  }",
+    "  form.setAttribute('action', toProxy(action));",
+    "});",
+    "window.addEventListener('error',(event)=>{",
+    "  notify('log', { level: 'error', scope: 'iframe-error', message: event?.message ?? 'Unknown iframe error' });",
+    "});",
+    "window.addEventListener('unhandledrejection',(event)=>{",
+    "  const reason=event?.reason;",
+    "  notify('log', { level: 'error', scope: 'iframe-unhandledrejection', message: reason?.message ?? String(reason ?? 'Unhandled rejection') });",
+    "});",
+    "})();"
+  ].join("\n");
+}
+
 function sanitizeRelayedDocument(activeDocument) {
   const { documentHtml, finalUrl, requestedUrl, tabId } = activeDocument ?? {};
   const baseUrl = finalUrl ?? requestedUrl ?? "";
   if (typeof DOMParser === "undefined") {
     return {
-      html: `<pre class="content-stage__relay-text">${escapeHtml(documentHtml)}</pre>`,
+      srcDoc: `<!doctype html><html><body><pre class="content-stage__relay-text">${escapeHtml(documentHtml)}</pre></body></html>`,
       strippedScripts: 0
     };
   }
 
   const parser = new DOMParser();
   const parsed = parser.parseFromString(String(documentHtml ?? ""), "text/html");
-  let strippedScripts = 0;
-
-  parsed.querySelectorAll("script").forEach((node) => {
-    strippedScripts += 1;
-    node.remove();
-  });
-
-  parsed.querySelectorAll("iframe, frame, object, embed, form, input, button, textarea, select, base, meta[http-equiv]").forEach((node) => {
+  parsed.querySelectorAll("base, meta[http-equiv='content-security-policy'], meta[http-equiv='refresh']").forEach((node) => {
     node.remove();
   });
 
@@ -217,63 +468,44 @@ function sanitizeRelayedDocument(activeDocument) {
       const name = attribute.name.toLowerCase();
       const value = attribute.value;
 
-      if (name.startsWith("on")) {
+      if (name === "integrity" || name === "crossorigin") {
         element.removeAttribute(attribute.name);
         continue;
       }
 
-      if (name === "src" || name === "href") {
+      if (name === "src" || name === "href" || name === "poster" || (name === "data" && tagName === "object")) {
         if (/^\s*javascript:/iu.test(value)) {
           element.removeAttribute(attribute.name);
           continue;
         }
 
-        try {
-          const absoluteUrl = new URL(value, baseUrl).href;
-          if (tagName === "a" && name === "href") {
-            element.setAttribute("data-proxy-href", absoluteUrl);
-            element.setAttribute(attribute.name, absoluteUrl);
-            continue;
-          }
-
-          if (tagName === "link" && name === "href") {
-            const rel = String(element.getAttribute("rel") ?? "").toLowerCase();
-            if (rel.includes("stylesheet") || rel.includes("icon") || rel.includes("preload")) {
-              element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
-              continue;
-            }
-          }
-
-          if (name === "src") {
-            element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
-            continue;
-          }
-
-          element.setAttribute(attribute.name, absoluteUrl);
-        } catch {
+        const absoluteUrl = resolveProxyAbsoluteUrl(value, baseUrl);
+        if (!absoluteUrl) {
           element.removeAttribute(attribute.name);
+          continue;
         }
+
+        if (tagName === "a" && name === "href") {
+          element.setAttribute("data-opensky-href", absoluteUrl);
+          element.setAttribute(attribute.name, absoluteUrl);
+          continue;
+        }
+
+        if (tagName === "link" && name === "href") {
+          const rel = String(element.getAttribute("rel") ?? "").toLowerCase();
+          if (rel.includes("stylesheet") || rel.includes("icon") || rel.includes("preload") || rel.includes("manifest") || rel.includes("modulepreload")) {
+            element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
+          } else {
+            element.setAttribute(attribute.name, absoluteUrl);
+          }
+          continue;
+        }
+
+        element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
       }
 
       if (name === "srcset") {
-        const rewrittenSrcSet = value
-          .split(",")
-          .map((entry) => {
-            const [candidateUrl, descriptor] = entry.trim().split(/\s+/, 2);
-            if (!candidateUrl) {
-              return "";
-            }
-
-            try {
-              const absoluteUrl = new URL(candidateUrl, baseUrl).href;
-              const proxiedUrl = createBrowseResourceUrl(tabId, absoluteUrl);
-              return descriptor ? `${proxiedUrl} ${descriptor}` : proxiedUrl;
-            } catch {
-              return entry.trim();
-            }
-          })
-          .filter(Boolean)
-          .join(", ");
+        const rewrittenSrcSet = rewriteSrcSetValue(value, baseUrl, tabId);
 
         if (rewrittenSrcSet) {
           element.setAttribute(attribute.name, rewrittenSrcSet);
@@ -281,30 +513,45 @@ function sanitizeRelayedDocument(activeDocument) {
           element.removeAttribute(attribute.name);
         }
       }
+
+      if (tagName === "form" && name === "action") {
+        const absoluteUrl = resolveProxyAbsoluteUrl(value, baseUrl);
+        if (!absoluteUrl) {
+          element.removeAttribute(attribute.name);
+          continue;
+        }
+        element.setAttribute("data-opensky-action", absoluteUrl);
+        element.setAttribute(attribute.name, createBrowseResourceUrl(tabId, absoluteUrl));
+      }
     }
 
-    if (tagName === "a" && element.hasAttribute("data-proxy-href")) {
+    if (tagName === "a" && element.hasAttribute("data-opensky-href")) {
       element.setAttribute("target", "_self");
       element.setAttribute("rel", "nofollow");
     }
   });
 
-  const body = parsed.body ?? parsed.documentElement;
+  const runtimeScript = parsed.createElement("script");
+  runtimeScript.textContent = createRelayRuntimeScript(tabId, baseUrl);
+  const scriptMount = parsed.head ?? parsed.body ?? parsed.documentElement;
+  scriptMount.prepend(runtimeScript);
+
   return {
-    html: body.innerHTML,
-    strippedScripts
+    srcDoc: `<!doctype html>\n${parsed.documentElement?.outerHTML ?? "<html><body></body></html>"}`,
+    strippedScripts: 0
   };
 }
 
 function hydrateRelayedDocument(documentRef, activeDocument) {
-  const mountNode = documentRef?.querySelector?.("[data-relay-document]");
+  const frameNode = documentRef?.querySelector?.("[data-relay-frame]");
   const noteNode = documentRef?.querySelector?.("[data-relay-note]");
-  if (!mountNode) {
+  if (!frameNode) {
     return;
   }
 
   if (!activeDocument?.documentHtml) {
-    mountNode.innerHTML = "";
+    frameNode.srcdoc = "";
+    delete frameNode.dataset.relaySignature;
     if (noteNode) {
       noteNode.textContent = "";
     }
@@ -312,7 +559,12 @@ function hydrateRelayedDocument(documentRef, activeDocument) {
   }
 
   const sanitized = sanitizeRelayedDocument(activeDocument);
-  mountNode.innerHTML = sanitized.html;
+  const nextSignature = `${activeDocument.tabId ?? "tab"}:${activeDocument.finalUrl ?? ""}:${String(activeDocument.documentHtml ?? "").length}`;
+  if (frameNode.dataset.relaySignature !== nextSignature) {
+    frameNode.srcdoc = sanitized.srcDoc;
+    frameNode.dataset.relaySignature = nextSignature;
+  }
+
   if (noteNode) {
     const t = createTranslator(documentRef?.documentElement?.lang ?? "en");
     if (Array.isArray(activeDocument?.unsupportedHosts) && activeDocument.unsupportedHosts.length) {
@@ -320,9 +572,7 @@ function hydrateRelayedDocument(documentRef, activeDocument) {
         domains: activeDocument.unsupportedHosts.join(", ")
       });
     } else {
-      noteNode.textContent = sanitized.strippedScripts > 0
-        ? t("workspace.proxyScriptsDisabled")
-        : t("workspace.proxyResourceMode");
+      noteNode.textContent = t("workspace.proxyResourceMode");
     }
   }
 }
@@ -331,6 +581,143 @@ function dismissBanner(store, id) {
   store.setState((state) => ({
     ...state,
     banners: state.banners.filter((banner) => banner.id !== id)
+  }));
+}
+
+function createSiteDraftFromUrl(rawUrl, fallbackDisplayName = "") {
+  const normalizedInput = String(rawUrl ?? "").trim();
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//iu.test(normalizedInput)
+    ? normalizedInput
+    : `https://${normalizedInput}`;
+  const parsedUrl = new URL(withProtocol);
+  const displayName = String(fallbackDisplayName ?? "").trim() || parsedUrl.hostname;
+  const normalizedSite = normalizeSiteDraft({
+    displayName,
+    baseDomain: parsedUrl.href,
+    pathRule: `${parsedUrl.pathname || "/"}${parsedUrl.search || ""}` || "/"
+  });
+
+  return {
+    parsedUrl,
+    normalizedSite
+  };
+}
+
+async function quickAddAllowlistAndOpen(store, rawUrl) {
+  const t = getTranslator(store);
+  let parsedUrl;
+  let normalizedSite;
+
+  try {
+    ({ parsedUrl, normalizedSite } = createSiteDraftFromUrl(rawUrl));
+  } catch {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "danger",
+      title: t("banner.invalidUrlTitle"),
+      message: t("banner.invalidUrlMessage")
+    });
+    return;
+  }
+
+  const state = store.getState();
+  const existingSite = findMatchingSiteForUrl(parsedUrl.href, state.sites);
+  if (!existingSite) {
+    await createSite({
+      ...normalizedSite.payload,
+      loginPersistenceAllowed: true,
+      uploadAllowed: true,
+      downloadAllowed: true
+    });
+    await refreshWorkspaceData(store, state.activeProjectId ?? state.projects[0]?.projectId ?? null);
+  }
+
+  await openUrlInWorkspace(store, parsedUrl.href, "open");
+}
+
+async function openUrlInWorkspace(store, rawUrl, mode = "auto") {
+  const targetUrl = String(rawUrl ?? "").trim();
+  const t = getTranslator(store);
+  const state = store.getState();
+
+  if (!targetUrl) {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "warning",
+      title: t("banner.missingWorkspaceContext"),
+      message: t("banner.missingUrlOnly")
+    });
+    return;
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(targetUrl);
+  } catch {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "danger",
+      title: t("banner.invalidUrlTitle"),
+      message: t("banner.invalidUrlMessage")
+    });
+    return;
+  }
+
+  const matchedSite = findMatchingSiteForUrl(parsedUrl.href, state.sites);
+  if (!matchedSite) {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "warning",
+      title: t("banner.urlNotConfiguredTitle"),
+      message: t("banner.urlNotConfiguredMessage", {
+        host: parsedUrl.hostname
+      }),
+      action: {
+        type: "quick-add-allowlist",
+        url: parsedUrl.href,
+        label: String(state.locale).startsWith("zh")
+          ? "加入白名單並開啟"
+          : "Add to allowlist and open"
+      }
+    });
+    return;
+  }
+
+  const projectId = state.activeProjectId ?? state.projects[0]?.projectId ?? null;
+  if (!projectId) {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "warning",
+      title: t("banner.missingWorkspaceContext"),
+      message: t("banner.missingProjectOnly")
+    });
+    return;
+  }
+
+  const shouldNavigate = (mode === "navigate" || mode === "auto") && Boolean(state.activeTabId) && state.activeSiteId === matchedSite.siteId;
+
+  if (shouldNavigate) {
+    await browseNavigate({
+      projectId,
+      tabId: state.activeTabId,
+      nextUrl: parsedUrl.href
+    });
+  } else {
+    await browseOpen({
+      projectId,
+      siteId: matchedSite.siteId,
+      entryUrl: parsedUrl.href
+    });
+  }
+
+  await refreshWorkspaceData(store, projectId);
+  store.setState((currentState) => ({
+    ...currentState,
+    settingsTrayOpen: false,
+    activeProjectId: projectId,
+    activeSiteId: matchedSite.siteId,
+    currentUrl: parsedUrl.href,
+    statusMessage: shouldNavigate ? t("status.tabNavigated") : t("status.controlledTabOpened")
   }));
 }
 
@@ -368,13 +755,27 @@ async function refreshWorkspaceData(store, projectId = null) {
     fetchAuditLog().catch(() => ({ items: [] }))
   ]);
 
-  const sites = normalizeItems(sitesPayload);
+  const sites = normalizeItems(sitesPayload).filter((site) => !isLegacyDemoSite(site));
   const projects = normalizeItems(projectsPayload);
   const vaultItems = normalizeItems(vaultPayload);
   const auditItems = normalizeItems(auditPayload);
-  const activeProjectId = projectId ?? previousState.activeProjectId ?? projects[0]?.projectId ?? null;
+  const storedProjectId = projects.some((item) => item.projectId === previousState.activeProjectId)
+    ? previousState.activeProjectId
+    : null;
+  const activeProjectId = projectId
+    ?? storedProjectId
+    ?? projects.find((item) => item.projectId === "project_demo")?.projectId
+    ?? projects[0]?.projectId
+    ?? null;
   const activeProject = projects.find((item) => item.projectId === activeProjectId) ?? null;
-  const activeSiteId = previousState.activeSiteId ?? activeProject?.defaultSiteId ?? sites[0]?.siteId ?? null;
+  const storedSiteId = sites.some((item) => item.siteId === previousState.activeSiteId)
+    ? previousState.activeSiteId
+    : null;
+  const activeSiteId = storedSiteId
+    ?? activeProject?.defaultSiteId
+    ?? sites.find((item) => item.siteId === "site_demo_example")?.siteId
+    ?? sites[0]?.siteId
+    ?? null;
   const [tabsPayload, bookmarksPayload, notesPayload] = activeProjectId
     ? await Promise.all([
         fetchTabs(activeProjectId).catch(() => ({ items: [] })),
@@ -382,7 +783,7 @@ async function refreshWorkspaceData(store, projectId = null) {
         fetchNotes(activeProjectId).catch(() => ({ items: [] }))
       ])
     : [{ items: [] }, { items: [] }, { items: [] }];
-  const tabs = normalizeItems(tabsPayload);
+  const tabs = normalizeItems(tabsPayload).filter((tab) => !["closed", "deleted"].includes(String(tab?.status ?? "")));
   const bookmarks = normalizeItems(bookmarksPayload);
   const notes = normalizeItems(notesPayload);
   const resolvedLayout = await fetchLayoutPreference(activeProjectId ?? undefined).catch(() => null);
@@ -456,12 +857,16 @@ async function refreshWorkspaceData(store, projectId = null) {
 
 function renderApp(state) {
   if (state.sessionStatus === "signed_in") {
+    if (state.workspaceStatus === "loading") {
+      return createWorkspaceBootMarkup(state);
+    }
+
     return createWorkspaceShellMarkup({
       locale: state.locale,
       layout: state.layout,
       session: state.session,
       statusMessage: state.statusMessage,
-      bannerMarkup: createBannerMarkup(state.banners, state.locale),
+      bannerMarkup: createBannerMarkup(state.banners.slice(0, 1), state.locale),
       workspace: {
         sites: state.sites,
         projects: state.projects,
@@ -484,7 +889,9 @@ function renderApp(state) {
         statusMessage: state.statusMessage,
         activeDocument: state.activeDocument,
         serviceInfo: state.serviceInfo,
-        serviceStatus: state.serviceStatus
+        serviceStatus: state.serviceStatus,
+        settingsTrayOpen: state.settingsTrayOpen,
+        settingsMenuOpen: state.settingsMenuOpen
       }
     });
   }
@@ -524,6 +931,9 @@ async function refreshSession(store) {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
+        workspaceStatus: "idle",
+        settingsTrayOpen: false,
+        settingsMenuOpen: false,
         session: null,
         statusMessage: t("status.signInToOpen")
       }));
@@ -533,10 +943,19 @@ async function refreshSession(store) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_in",
+      workspaceStatus: "loading",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session,
-      statusMessage: t("status.workspaceRestored")
+      statusMessage: t("service.loadingMessage")
     }));
     await refreshWorkspaceData(store);
+    await ensureDemoAutoReady(store);
+    store.setState((state) => ({
+      ...state,
+      workspaceStatus: "ready",
+      statusMessage: t("status.workspaceRestored")
+    }));
   } catch (error) {
     logFrontendIssue("refresh-session", error);
     const errorCode = error?.payload?.code;
@@ -544,6 +963,9 @@ async function refreshSession(store) {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
+        workspaceStatus: "idle",
+        settingsTrayOpen: false,
+        settingsMenuOpen: false,
         session: null,
         statusMessage: t("status.signInToOpen")
       }));
@@ -560,6 +982,9 @@ async function refreshSession(store) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_out",
+      workspaceStatus: "idle",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session: null,
       statusMessage: t("status.backendUnavailable")
     }));
@@ -575,6 +1000,7 @@ async function handleSignInSubmit(store, formElement) {
   store.setState((state) => ({
     ...state,
     sessionStatus: "loading",
+    workspaceStatus: "idle",
     statusMessage: t("status.signingIn")
   }));
 
@@ -583,10 +1009,19 @@ async function handleSignInSubmit(store, formElement) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_in",
+      workspaceStatus: "loading",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session,
-      statusMessage: t("status.signedIn")
+      statusMessage: t("service.loadingMessage")
     }));
     await refreshWorkspaceData(store);
+    await ensureDemoAutoReady(store);
+    store.setState((state) => ({
+      ...state,
+      workspaceStatus: "ready",
+      statusMessage: t("status.signedIn")
+    }));
   } catch (error) {
     logFrontendIssue("sign-in", error, { username });
     const displayError = describeUiError(error, store.getState().locale);
@@ -599,6 +1034,9 @@ async function handleSignInSubmit(store, formElement) {
     store.setState((state) => ({
       ...state,
       sessionStatus: "signed_out",
+      workspaceStatus: "idle",
+      settingsTrayOpen: false,
+      settingsMenuOpen: false,
       session: null,
       statusMessage: t("status.signInToContinue")
     }));
@@ -608,8 +1046,20 @@ async function handleSignInSubmit(store, formElement) {
 async function handleAction(store, action, targetElement, documentRef) {
   const t = getTranslator(store);
   try {
+    if (action !== "toggle-settings-menu" && store.getState().settingsMenuOpen) {
+      store.setState((state) => ({
+        ...state,
+        settingsMenuOpen: false
+      }));
+    }
+
     if (action === "dismiss-banner") {
       dismissBanner(store, targetElement.dataset.bannerId);
+      return;
+    }
+
+    if (action === "quick-add-allowlist") {
+      await quickAddAllowlistAndOpen(store, targetElement.dataset.url ?? "");
       return;
     }
 
@@ -623,15 +1073,39 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "toggle-settings-menu") {
+      store.setState((state) => ({
+        ...state,
+        settingsMenuOpen: !state.settingsMenuOpen
+      }));
+      return;
+    }
+
+    if (action === "open-settings-page") {
+      store.setState((state) => ({
+        ...state,
+        settingsTrayOpen: true,
+        settingsMenuOpen: false,
+        statusMessage: t("status.workspaceOverview")
+      }));
+      return;
+    }
+
+    if (action === "close-settings-page") {
+      store.setState((state) => ({
+        ...state,
+        settingsTrayOpen: false,
+        settingsMenuOpen: false
+      }));
+      return;
+    }
+
     if (action === "toggle-settings-tray") {
       store.setState((state) => ({
         ...state,
-        layout: {
-          ...state.layout,
-          topBarState: state.layout.topBarState === "expanded" ? "hidden" : "expanded"
-        }
+        settingsTrayOpen: !state.settingsTrayOpen,
+        settingsMenuOpen: false
       }));
-      await persistLayoutPreference(store);
       return;
     }
 
@@ -640,6 +1114,9 @@ async function handleAction(store, action, targetElement, documentRef) {
       store.setState((state) => ({
         ...state,
         sessionStatus: "signed_out",
+        workspaceStatus: "idle",
+        settingsTrayOpen: false,
+        settingsMenuOpen: false,
         session: null,
         sites: [],
         projects: [],
@@ -717,10 +1194,11 @@ async function handleAction(store, action, targetElement, documentRef) {
     }
 
     if (action === "enter-fullscreen") {
-      const contentStage = documentRef.getElementById("content-stage");
+      const fullscreenTarget = documentRef.getElementById("app")
+        ?? documentRef.getElementById("content-stage");
       const result = await requestFullscreenWithFallback({
         documentRef,
-        targetElement: contentStage,
+        targetElement: fullscreenTarget,
         layout: store.getState().layout,
         locale: store.getState().locale
       });
@@ -733,6 +1211,24 @@ async function handleAction(store, action, targetElement, documentRef) {
       if (result.banner) {
         pushBanner(store, result.banner);
       }
+      await persistLayoutPreference(store);
+      return;
+    }
+
+    if (action === "exit-fullscreen") {
+      try {
+        await documentRef?.exitFullscreen?.();
+      } catch (error) {
+        logFrontendIssue("exit-fullscreen", error);
+      }
+
+      store.setState((state) => ({
+        ...state,
+        layout: reduceLayoutState(state.layout, {
+          type: "set-view-mode",
+          viewMode: "maximized"
+        })
+      }));
       await persistLayoutPreference(store);
       return;
     }
@@ -750,11 +1246,132 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "edit-site-url") {
+      const state = store.getState();
+      const siteId = targetElement.dataset.siteId;
+      const site = state.sites.find((item) => item.siteId === siteId);
+      if (!site) {
+        return;
+      }
+
+      const isZh = String(state.locale).startsWith("zh");
+      const currentSiteUrl = `https://${site.baseDomains?.[0] ?? ""}${site.pathRules?.[0] ?? "/"}`;
+      const nextUrlInput = globalThis.prompt?.(
+        isZh ? "網站網址（可輸入完整 URL）" : "Site URL (full URL allowed)",
+        currentSiteUrl
+      );
+      if (nextUrlInput == null) {
+        return;
+      }
+
+      const nextDisplayNameInput = globalThis.prompt?.(
+        isZh ? "網站名稱" : "Site name",
+        site.displayName ?? ""
+      );
+      if (nextDisplayNameInput == null) {
+        return;
+      }
+
+      let normalizedSite;
+      try {
+        ({ normalizedSite } = createSiteDraftFromUrl(
+          String(nextUrlInput ?? "").trim(),
+          String(nextDisplayNameInput ?? "").trim()
+        ));
+      } catch {
+        pushBanner(store, {
+          id: crypto.randomUUID(),
+          tone: "danger",
+          title: t("banner.invalidUrlTitle"),
+          message: t("banner.invalidUrlMessage")
+        });
+        return;
+      }
+
+      await updateSite(siteId, normalizedSite.payload);
+      await refreshWorkspaceData(store, state.activeProjectId);
+      store.setState((currentState) => ({
+        ...currentState,
+        activeSiteId: siteId
+      }));
+      return;
+    }
+
+    if (action === "edit-site") {
+      const state = store.getState();
+      const siteId = targetElement.dataset.siteId;
+      const site = state.sites.find((item) => item.siteId === siteId);
+      if (!site) {
+        return;
+      }
+
+      const isZh = String(state.locale).startsWith("zh");
+      const displayName = globalThis.prompt?.(
+        isZh ? "網站名稱" : "Site name",
+        site.displayName ?? ""
+      );
+      if (displayName == null) {
+        return;
+      }
+
+      const baseDomain = globalThis.prompt?.(
+        isZh ? "白名單網域（用逗號分隔）" : "Allowlisted base domains (comma separated)",
+        Array.isArray(site.baseDomains) ? site.baseDomains.join(", ") : ""
+      );
+      if (baseDomain == null) {
+        return;
+      }
+
+      const pathRule = globalThis.prompt?.(
+        isZh ? "路徑規則（例如 / 或 /team）" : "Path rule (for example / or /team)",
+        Array.isArray(site.pathRules) ? (site.pathRules[0] ?? "/") : "/"
+      );
+      if (pathRule == null) {
+        return;
+      }
+
+      const normalizedSite = normalizeSiteDraft({
+        displayName,
+        baseDomain,
+        pathRule
+      });
+
+      await updateSite(siteId, normalizedSite.payload);
+      await refreshWorkspaceData(store, state.activeProjectId);
+      store.setState((currentState) => ({
+        ...currentState,
+        activeSiteId: siteId
+      }));
+      return;
+    }
+
+    if (action === "delete-site") {
+      const state = store.getState();
+      const siteId = targetElement.dataset.siteId;
+      const site = state.sites.find((item) => item.siteId === siteId);
+      if (!site) {
+        return;
+      }
+
+      const isZh = String(state.locale).startsWith("zh");
+      const confirmed = globalThis.confirm
+        ? globalThis.confirm(isZh ? `刪除網站「${site.displayName}」？` : `Delete site "${site.displayName}"?`)
+        : true;
+      if (!confirmed) {
+        return;
+      }
+
+      await deleteSite(siteId);
+      await refreshWorkspaceData(store, state.activeProjectId);
+      return;
+    }
+
     if (action === "select-tab") {
       store.setState((state) => {
         const activeTab = state.tabs.find((tab) => tab.tabId === targetElement.dataset.tabId);
         return {
           ...state,
+          settingsTrayOpen: false,
           activeTabId: targetElement.dataset.tabId,
           currentUrl: activeTab?.currentUrl ?? state.currentUrl
         };
@@ -765,7 +1382,7 @@ async function handleAction(store, action, targetElement, documentRef) {
     if (action === "open-site") {
       const state = store.getState();
       const siteId = targetElement.dataset.siteId ?? state.activeSiteId;
-      const projectId = state.activeProjectId;
+      const projectId = state.activeProjectId ?? state.projects[0]?.projectId ?? null;
       const site = state.sites.find((item) => item.siteId === siteId);
 
       if (!projectId || !site) {
@@ -789,10 +1406,16 @@ async function handleAction(store, action, targetElement, documentRef) {
       await refreshWorkspaceData(store, projectId);
       store.setState((currentState) => ({
         ...currentState,
+        settingsTrayOpen: false,
         activeSiteId: site.siteId,
         currentUrl: entryUrl,
         statusMessage: t("status.controlledTabOpened")
       }));
+      return;
+    }
+
+    if (action === "open-demo-url") {
+      await openUrlInWorkspace(store, String(targetElement.dataset.url ?? ""), "open");
       return;
     }
 
@@ -804,6 +1427,7 @@ async function handleAction(store, action, targetElement, documentRef) {
     if (action === "back-to-workspace") {
       store.setState((state) => ({
         ...state,
+        settingsTrayOpen: false,
         activeTabId: null,
         currentUrl: "",
         activeDocument: null,
@@ -814,38 +1438,7 @@ async function handleAction(store, action, targetElement, documentRef) {
 
     if (action === "browse-open" || action === "browse-navigate") {
       const currentUrl = String(documentRef.querySelector("[data-url-input]")?.value ?? "").trim();
-      const { activeProjectId, activeSiteId, activeTabId } = store.getState();
-
-      if (!activeProjectId || !activeSiteId || !currentUrl) {
-        pushBanner(store, {
-          id: crypto.randomUUID(),
-          tone: "warning",
-          title: t("banner.missingWorkspaceContext"),
-          message: t("banner.missingProjectSiteUrl")
-        });
-        return;
-      }
-
-      if (action === "browse-open") {
-        await browseOpen({
-          projectId: activeProjectId,
-          siteId: activeSiteId,
-          entryUrl: currentUrl
-        });
-      } else if (activeTabId) {
-        await browseNavigate({
-          projectId: activeProjectId,
-          tabId: activeTabId,
-          nextUrl: currentUrl
-        });
-      }
-
-      await refreshWorkspaceData(store, activeProjectId);
-      store.setState((state) => ({
-        ...state,
-        currentUrl,
-        statusMessage: action === "browse-open" ? t("status.controlledTabOpened") : t("status.tabNavigated")
-      }));
+      await openUrlInWorkspace(store, currentUrl, action === "browse-navigate" ? "navigate" : "open");
       return;
     }
 
@@ -953,12 +1546,16 @@ async function handleAction(store, action, targetElement, documentRef) {
   }
 }
 
-async function handleProxyDocumentClick(store, anchorElement) {
-  const nextUrl = String(anchorElement?.dataset?.proxyHref ?? "").trim();
+async function handleProxyFrameNavigate(store, nextUrl, tabId = null) {
+  const normalizedNextUrl = String(nextUrl ?? "").trim();
   const { activeProjectId, activeTabId } = store.getState();
   const t = getTranslator(store);
 
-  if (!nextUrl || !activeProjectId || !activeTabId) {
+  if (!normalizedNextUrl || !activeProjectId || !activeTabId) {
+    return;
+  }
+
+  if (tabId && tabId !== activeTabId) {
     return;
   }
 
@@ -966,19 +1563,19 @@ async function handleProxyDocumentClick(store, anchorElement) {
     await browseNavigate({
       projectId: activeProjectId,
       tabId: activeTabId,
-      nextUrl
+      nextUrl: normalizedNextUrl
     });
     await refreshWorkspaceData(store, activeProjectId);
     store.setState((state) => ({
       ...state,
-      currentUrl: nextUrl,
+      currentUrl: normalizedNextUrl,
       statusMessage: t("status.tabNavigated")
     }));
   } catch (error) {
-    logFrontendIssue("proxy-document-click", error, {
+    logFrontendIssue("proxy-frame-navigate", error, {
       activeProjectId,
       activeTabId,
-      nextUrl
+      nextUrl: normalizedNextUrl
     });
     const displayError = describeUiError(error, store.getState().locale);
     pushBanner(store, {
@@ -990,26 +1587,60 @@ async function handleProxyDocumentClick(store, anchorElement) {
   }
 }
 
-export function bootApplication(documentRef = globalThis.document) {
-  const mountNode = documentRef?.getElementById?.("app");
-  if (!mountNode) {
+async function handleProxyFrameMessage(store, event) {
+  const payload = event?.data;
+  if (!payload || typeof payload !== "object" || payload.source !== "opensky-proxy") {
     return;
   }
 
-  const store = createStore(createInitialState());
-
-  function render() {
-    setLocaleOnDocument(documentRef, store.getState().locale);
-    mountNode.innerHTML = renderApp(store.getState());
-    hydrateRelayedDocument(documentRef, store.getState().activeDocument);
+  if (payload.type === "navigate") {
+    await handleProxyFrameNavigate(store, payload.nextUrl, payload.tabId ?? null);
+    return;
   }
 
-  store.subscribe(render);
-  render();
-  refreshServiceInfo(store);
-  refreshSession(store);
+  if (payload.type === "log") {
+    console.log("OpenSky proxy runtime", {
+      level: payload.level ?? "info",
+      scope: payload.scope ?? "iframe",
+      message: payload.message ?? "",
+      tabId: payload.tabId ?? null
+    });
+    return;
+  }
 
-  mountNode.addEventListener("submit", async (event) => {
+  if (payload.type === "error") {
+    logFrontendIssue("proxy-runtime", new Error(payload.message ?? "Proxy runtime error"), {
+      code: payload.code ?? null,
+      tabId: payload.tabId ?? null
+    });
+  }
+}
+
+export function bootApplication(documentRef = globalThis.document) {
+  try {
+    const mountNode = documentRef?.getElementById?.("app");
+    if (!mountNode) {
+      return;
+    }
+
+    const store = createStore(createInitialState());
+
+    function render() {
+      try {
+        setLocaleOnDocument(documentRef, store.getState().locale);
+        mountNode.innerHTML = renderApp(store.getState());
+        hydrateRelayedDocument(documentRef, store.getState().activeDocument);
+      } catch (error) {
+        renderFatalStartupError(documentRef, error);
+      }
+    }
+
+    store.subscribe(render);
+    render();
+    refreshServiceInfo(store);
+    refreshSession(store);
+
+    mountNode.addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-sign-in-form]");
     if (form) {
       event.preventDefault();
@@ -1101,6 +1732,11 @@ export function bootApplication(documentRef = globalThis.document) {
         }));
       }
 
+      if (workspaceForm.dataset.form === "quick-open") {
+        await openUrlInWorkspace(store, String(formData.get("targetUrl") ?? ""), "auto");
+        return;
+      }
+
       if (workspaceForm.dataset.form === "navigate-tab" && state.activeProjectId && state.activeTabId) {
         const nextUrl = String(formData.get("nextUrl") ?? "").trim();
         if (nextUrl) {
@@ -1133,14 +1769,15 @@ export function bootApplication(documentRef = globalThis.document) {
         message: displayError.message
       });
     }
-  });
+    });
 
-  mountNode.addEventListener("click", async (event) => {
-    const proxyAnchor = event.target.closest("[data-proxy-href]");
-    if (proxyAnchor) {
-      event.preventDefault();
-      await handleProxyDocumentClick(store, proxyAnchor);
-      return;
+    mountNode.addEventListener("click", async (event) => {
+    const menuRoot = event.target.closest?.("[data-browser-menu-root]");
+    if (store.getState().settingsMenuOpen && !menuRoot) {
+      store.setState((state) => ({
+        ...state,
+        settingsMenuOpen: false
+      }));
     }
 
     const button = event.target.closest("[data-action]");
@@ -1150,15 +1787,38 @@ export function bootApplication(documentRef = globalThis.document) {
 
     event.preventDefault();
     await handleAction(store, button.dataset.action, button, documentRef);
-  });
+    });
 
-  globalThis.addEventListener?.("error", (event) => {
-    logFrontendIssue("window-error", event?.error ?? event?.message ?? "Unknown window error");
-  });
+    globalThis.addEventListener?.("message", async (event) => {
+      await handleProxyFrameMessage(store, event);
+    });
 
-  globalThis.addEventListener?.("unhandledrejection", (event) => {
-    logFrontendIssue("unhandled-rejection", event?.reason ?? "Unhandled promise rejection");
-  });
+    documentRef?.addEventListener?.("fullscreenchange", () => {
+    const state = store.getState();
+    if (!documentRef?.fullscreenElement && state.layout.viewMode === "fullscreen") {
+      store.setState((currentState) => ({
+        ...currentState,
+        layout: reduceLayoutState(currentState.layout, {
+          type: "set-view-mode",
+          viewMode: "maximized"
+        })
+      }));
+      persistLayoutPreference(store).catch((error) => {
+        logFrontendIssue("persist-layout-after-fullscreenchange", error);
+      });
+    }
+    });
+
+    globalThis.addEventListener?.("error", (event) => {
+      logFrontendIssue("window-error", event?.error ?? event?.message ?? "Unknown window error");
+    });
+
+    globalThis.addEventListener?.("unhandledrejection", (event) => {
+      logFrontendIssue("unhandled-rejection", event?.reason ?? "Unhandled promise rejection");
+    });
+  } catch (error) {
+    renderFatalStartupError(documentRef, error);
+  }
 }
 
 if (typeof window !== "undefined" && typeof document !== "undefined") {

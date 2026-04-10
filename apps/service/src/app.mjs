@@ -17,6 +17,60 @@ export function createServiceHandler(context) {
   const router = createRouter();
   let demoSeedPromise = null;
 
+  const demoSites = [
+    {
+      siteId: "site_demo_example",
+      displayName: "Example",
+      baseDomains: ["example.com"],
+      pathRules: ["/"],
+      verifiedUrl: "https://example.com/"
+    },
+    {
+      siteId: "site_demo_mdn",
+      displayName: "MDN Docs",
+      baseDomains: ["developer.mozilla.org", "transcend-cdn.com"],
+      pathRules: ["/"],
+      verifiedUrl: "https://developer.mozilla.org/zh-TW/"
+    },
+    {
+      siteId: "site_demo_iana",
+      displayName: "IANA Reserved Domains",
+      baseDomains: ["www.iana.org", "iana.org"],
+      pathRules: ["/domains/reserved"],
+      verifiedUrl: "https://www.iana.org/domains/reserved"
+    },
+    {
+      siteId: "site_demo_chatgpt_login",
+      displayName: "ChatGPT Login",
+      baseDomains: ["chatgpt.com", "cdn.oaistatic.com", "oaistatic.com"],
+      pathRules: ["/"],
+      verifiedUrl: "https://chatgpt.com/auth/login"
+    }
+  ];
+
+  const demoShortcuts = [
+    {
+      id: "demo-example",
+      label: "Example.com",
+      url: "https://example.com/"
+    },
+    {
+      id: "demo-mdn",
+      label: "MDN zh-TW",
+      url: "https://developer.mozilla.org/zh-TW/"
+    },
+    {
+      id: "demo-iana",
+      label: "IANA Reserved Domains",
+      url: "https://www.iana.org/domains/reserved"
+    },
+    {
+      id: "demo-chatgpt-login",
+      label: "ChatGPT Login",
+      url: "https://chatgpt.com/auth/login"
+    }
+  ];
+
   const ensureDemoSeeded = async () => {
     if (context.runtime.environment === "production" || !context.runtime.demoPresetEnabled) {
       return;
@@ -24,20 +78,33 @@ export function createServiceHandler(context) {
 
     if (!demoSeedPromise) {
       demoSeedPromise = (async () => {
-        const [sites, projects, layoutPreferences] = await Promise.all([
+        const [sites, projects, tabs, layoutPreferences] = await Promise.all([
           context.store.list("sites"),
           context.store.list("projects"),
+          context.store.list("tabs"),
           context.store.list("layoutPreferences")
         ]);
 
-        const shouldSeedDemoWorkspace = !sites.length && !projects.length;
+        const legacyDemoSites = sites.filter((site) => (
+          site.siteId === "site_demo"
+          || site.displayName === "OpenSky Demo"
+          || (Array.isArray(site.baseDomains) && site.baseDomains.includes("demo.opensky.local"))
+        ));
 
-        if (shouldSeedDemoWorkspace) {
-          await context.store.set("sites", "site_demo", {
-            siteId: "site_demo",
-            displayName: "OpenSky Demo",
-            baseDomains: ["demo.opensky.local"],
-            pathRules: ["/"],
+        for (const legacySite of legacyDemoSites) {
+          await context.store.delete("sites", legacySite.siteId);
+          const relatedTabs = tabs.filter((tab) => tab.siteId === legacySite.siteId);
+          for (const tab of relatedTabs) {
+            await context.store.delete("tabs", tab.tabId);
+          }
+        }
+
+        for (const demoSite of demoSites) {
+          await context.store.set("sites", demoSite.siteId, {
+            siteId: demoSite.siteId,
+            displayName: demoSite.displayName,
+            baseDomains: demoSite.baseDomains,
+            pathRules: demoSite.pathRules,
             defaultRenderMode: "allowlist-proxy-phase1",
             loginPersistenceAllowed: true,
             downloadAllowed: true,
@@ -46,19 +113,21 @@ export function createServiceHandler(context) {
             createdAt: context.runtime.startedAt,
             updatedAt: context.runtime.startedAt
           });
-          await context.store.set("projects", "project_demo", {
-            projectId: "project_demo",
-            name: "Demo Workspace",
-            description: "Verified local demo preset",
-            defaultSiteId: "site_demo",
-            status: "active",
-            lastOpenedAt: context.runtime.startedAt,
-            createdAt: context.runtime.startedAt,
-            updatedAt: context.runtime.startedAt
-          });
         }
 
-        if (shouldSeedDemoWorkspace && !layoutPreferences.length) {
+        const existingProject = projects.find((project) => project.projectId === "project_demo");
+        await context.store.set("projects", "project_demo", {
+          projectId: "project_demo",
+          name: "Demo Workspace",
+          description: "Verified real-site demo preset",
+          defaultSiteId: "site_demo_example",
+          status: "active",
+          lastOpenedAt: context.runtime.startedAt,
+          createdAt: existingProject?.createdAt ?? context.runtime.startedAt,
+          updatedAt: context.runtime.startedAt
+        });
+
+        if (!layoutPreferences.length) {
           await context.store.set("layoutPreferences", "layout_demo_global", {
             layoutPreferenceId: "layout_demo_global",
             scope: "global",
@@ -122,10 +191,18 @@ export function createServiceHandler(context) {
       "Allowlisted sites must use hostname-only base domains and explicit path rules."
     ],
     demoPreset: {
-      siteDisplayName: "OpenSky Demo",
+      siteDisplayName: "Example",
       projectName: "Demo Workspace",
-      verifiedEntryUrl: "https://demo.opensky.local/",
-      verifiedSecondaryUrl: "https://demo.opensky.local/status"
+      verifiedEntryUrl: "https://example.com/",
+      verifiedSecondaryUrl: "https://developer.mozilla.org/zh-TW/",
+      demoSites: demoSites.map((site) => ({
+        siteId: site.siteId,
+        displayName: site.displayName,
+        baseDomains: site.baseDomains,
+        pathRules: site.pathRules,
+        verifiedUrl: site.verifiedUrl
+      })),
+      shortcuts: demoShortcuts
     },
     routes: {
       health: "/health",
@@ -156,10 +233,18 @@ export function createServiceHandler(context) {
       "Allowlisted sites must use hostname-only base domains and explicit path rules."
     ],
     demoPreset: {
-      siteDisplayName: "OpenSky Demo",
+      siteDisplayName: "Example",
       projectName: "Demo Workspace",
-      verifiedEntryUrl: "https://demo.opensky.local/",
-      verifiedSecondaryUrl: "https://demo.opensky.local/status"
+      verifiedEntryUrl: "https://example.com/",
+      verifiedSecondaryUrl: "https://developer.mozilla.org/zh-TW/",
+      demoSites: demoSites.map((site) => ({
+        siteId: site.siteId,
+        displayName: site.displayName,
+        baseDomains: site.baseDomains,
+        pathRules: site.pathRules,
+        verifiedUrl: site.verifiedUrl
+      })),
+      shortcuts: demoShortcuts
     },
     routes: {
       health: "/health",

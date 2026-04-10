@@ -58,7 +58,7 @@ test("workspace shell accepts app workspace state shape and renders browser menu
   assert.match(markup, /Direct tests/);
   assert.match(markup, /Example\.com/);
   assert.match(markup, /MDN zh-TW/);
-  assert.match(markup, /data-action="edit-site"/);
+  assert.match(markup, /data-action="edit-site-url"/);
   assert.match(markup, /data-action="delete-site"/);
   assert.match(markup, /可填一個或多個白名單網域/);
   assert.match(markup, /路徑規則只填路徑/);

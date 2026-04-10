@@ -584,6 +584,57 @@ function dismissBanner(store, id) {
   }));
 }
 
+function createSiteDraftFromUrl(rawUrl, fallbackDisplayName = "") {
+  const normalizedInput = String(rawUrl ?? "").trim();
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//iu.test(normalizedInput)
+    ? normalizedInput
+    : `https://${normalizedInput}`;
+  const parsedUrl = new URL(withProtocol);
+  const displayName = String(fallbackDisplayName ?? "").trim() || parsedUrl.hostname;
+  const normalizedSite = normalizeSiteDraft({
+    displayName,
+    baseDomain: parsedUrl.href,
+    pathRule: `${parsedUrl.pathname || "/"}${parsedUrl.search || ""}` || "/"
+  });
+
+  return {
+    parsedUrl,
+    normalizedSite
+  };
+}
+
+async function quickAddAllowlistAndOpen(store, rawUrl) {
+  const t = getTranslator(store);
+  let parsedUrl;
+  let normalizedSite;
+
+  try {
+    ({ parsedUrl, normalizedSite } = createSiteDraftFromUrl(rawUrl));
+  } catch {
+    pushBanner(store, {
+      id: crypto.randomUUID(),
+      tone: "danger",
+      title: t("banner.invalidUrlTitle"),
+      message: t("banner.invalidUrlMessage")
+    });
+    return;
+  }
+
+  const state = store.getState();
+  const existingSite = findMatchingSiteForUrl(parsedUrl.href, state.sites);
+  if (!existingSite) {
+    await createSite({
+      ...normalizedSite.payload,
+      loginPersistenceAllowed: true,
+      uploadAllowed: true,
+      downloadAllowed: true
+    });
+    await refreshWorkspaceData(store, state.activeProjectId ?? state.projects[0]?.projectId ?? null);
+  }
+
+  await openUrlInWorkspace(store, parsedUrl.href, "open");
+}
+
 async function openUrlInWorkspace(store, rawUrl, mode = "auto") {
   const targetUrl = String(rawUrl ?? "").trim();
   const t = getTranslator(store);
@@ -620,7 +671,14 @@ async function openUrlInWorkspace(store, rawUrl, mode = "auto") {
       title: t("banner.urlNotConfiguredTitle"),
       message: t("banner.urlNotConfiguredMessage", {
         host: parsedUrl.hostname
-      })
+      }),
+      action: {
+        type: "quick-add-allowlist",
+        url: parsedUrl.href,
+        label: String(state.locale).startsWith("zh")
+          ? "加入白名單並開啟"
+          : "Add to allowlist and open"
+      }
     });
     return;
   }
@@ -1000,6 +1058,11 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "quick-add-allowlist") {
+      await quickAddAllowlistAndOpen(store, targetElement.dataset.url ?? "");
+      return;
+    }
+
     if (action === "set-locale") {
       const nextLocale = saveLocale(targetElement.dataset.locale ?? store.getState().locale);
       store.setState((state) => ({
@@ -1183,6 +1246,57 @@ async function handleAction(store, action, targetElement, documentRef) {
       return;
     }
 
+    if (action === "edit-site-url") {
+      const state = store.getState();
+      const siteId = targetElement.dataset.siteId;
+      const site = state.sites.find((item) => item.siteId === siteId);
+      if (!site) {
+        return;
+      }
+
+      const isZh = String(state.locale).startsWith("zh");
+      const currentSiteUrl = `https://${site.baseDomains?.[0] ?? ""}${site.pathRules?.[0] ?? "/"}`;
+      const nextUrlInput = globalThis.prompt?.(
+        isZh ? "網站網址（可輸入完整 URL）" : "Site URL (full URL allowed)",
+        currentSiteUrl
+      );
+      if (nextUrlInput == null) {
+        return;
+      }
+
+      const nextDisplayNameInput = globalThis.prompt?.(
+        isZh ? "網站名稱" : "Site name",
+        site.displayName ?? ""
+      );
+      if (nextDisplayNameInput == null) {
+        return;
+      }
+
+      let normalizedSite;
+      try {
+        ({ normalizedSite } = createSiteDraftFromUrl(
+          String(nextUrlInput ?? "").trim(),
+          String(nextDisplayNameInput ?? "").trim()
+        ));
+      } catch {
+        pushBanner(store, {
+          id: crypto.randomUUID(),
+          tone: "danger",
+          title: t("banner.invalidUrlTitle"),
+          message: t("banner.invalidUrlMessage")
+        });
+        return;
+      }
+
+      await updateSite(siteId, normalizedSite.payload);
+      await refreshWorkspaceData(store, state.activeProjectId);
+      store.setState((currentState) => ({
+        ...currentState,
+        activeSiteId: siteId
+      }));
+      return;
+    }
+
     if (action === "edit-site") {
       const state = store.getState();
       const siteId = targetElement.dataset.siteId;
@@ -1268,7 +1382,7 @@ async function handleAction(store, action, targetElement, documentRef) {
     if (action === "open-site") {
       const state = store.getState();
       const siteId = targetElement.dataset.siteId ?? state.activeSiteId;
-      const projectId = state.activeProjectId;
+      const projectId = state.activeProjectId ?? state.projects[0]?.projectId ?? null;
       const site = state.sites.find((item) => item.siteId === siteId);
 
       if (!projectId || !site) {

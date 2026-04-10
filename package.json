@@ -16,5 +16,11 @@
     "dev:web": "npm run dev --workspace @opensky/web",
     "start:web": "npm run start --workspace @opensky/web",
     "start:service": "node apps/service/src/server.mjs"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "parse5": "^8.0.0",
+    "tldts": "^7.0.28",
+    "tough-cookie": "^6.0.1"
   }
 }

@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { Readable } from "node:stream";
 import { createServiceHandler } from "./app.mjs";
+import { createProxyResourceGateway } from "./browse/proxy-resource-gateway.mjs";
 import { createServiceContext } from "./common/service-context.mjs";
 import { formatStartupLog } from "./common/service-config.mjs";
 import { jsonResponse } from "./common/http.mjs";
@@ -46,7 +48,7 @@ function buildCorsHeaders(origin, context) {
     ...headers,
     "access-control-allow-origin": allowedOrigin,
     "access-control-allow-credentials": "true",
-    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,HEAD,OPTIONS",
     "access-control-allow-headers": "content-type,x-opensky-session,accept-language",
     "access-control-max-age": "600"
   };
@@ -55,10 +57,12 @@ function buildCorsHeaders(origin, context) {
 export function startServer(port = Number(process.env.PORT ?? "8787"), options = {}) {
   const context = createServiceContext(options);
   const handler = createServiceHandler(context);
+  const proxyResourceGateway = createProxyResourceGateway(context);
 
   const server = createServer(async (incomingMessage, serverResponse) => {
     const origin = String(incomingMessage.headers.origin ?? "");
     const corsHeaders = buildCorsHeaders(origin, context);
+    const requestUrl = new URL(incomingMessage.url ?? "/", `http://${incomingMessage.headers.host ?? "localhost"}`);
 
     if ((incomingMessage.method ?? "GET") === "OPTIONS") {
       const allowedOrigin = corsHeaders["access-control-allow-origin"];
@@ -71,7 +75,14 @@ export function startServer(port = Number(process.env.PORT ?? "8787"), options =
     }
 
     try {
-      const requestUrl = new URL(incomingMessage.url ?? "/", `http://${incomingMessage.headers.host ?? "localhost"}`);
+      const handledByProxyGateway = await proxyResourceGateway.handle(incomingMessage, serverResponse, {
+        requestUrl,
+        corsHeaders
+      });
+      if (handledByProxyGateway) {
+        return;
+      }
+
       const method = incomingMessage.method ?? "GET";
       const requestInit = {
         method,
@@ -93,8 +104,18 @@ export function startServer(port = Number(process.env.PORT ?? "8787"), options =
         serverResponse.setHeader(key, value);
       });
 
-      const buffer = Buffer.from(await response.arrayBuffer());
-      serverResponse.end(buffer);
+      if (!response.body) {
+        serverResponse.end();
+        return;
+      }
+
+      const responseStream = Readable.fromWeb(response.body);
+      responseStream.on("error", () => {
+        if (!serverResponse.writableEnded) {
+          serverResponse.destroy();
+        }
+      });
+      responseStream.pipe(serverResponse);
     } catch (error) {
       const fallbackRequest = new Request("http://localhost/", {
         headers: incomingMessage.headers

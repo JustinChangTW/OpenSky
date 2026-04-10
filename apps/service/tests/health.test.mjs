@@ -33,10 +33,62 @@ test("service info endpoint responds with demoable prototype metadata", async ()
   assert.equal(payload.prototypeStage, "demoable-minimal-prototype");
   assert.equal(payload.browsingMode, "allowlist-based remote browsing / controlled relay");
   assert.deepEqual(payload.demoPreset, {
-    siteDisplayName: "OpenSky Demo",
+    siteDisplayName: "Example",
     projectName: "Demo Workspace",
-    verifiedEntryUrl: "https://demo.opensky.local/",
-    verifiedSecondaryUrl: "https://demo.opensky.local/status"
+    verifiedEntryUrl: "https://example.com/",
+    verifiedSecondaryUrl: "https://developer.mozilla.org/zh-TW/",
+    demoSites: [
+      {
+        siteId: "site_demo_example",
+        displayName: "Example",
+        baseDomains: ["example.com"],
+        pathRules: ["/"],
+        verifiedUrl: "https://example.com/"
+      },
+      {
+        siteId: "site_demo_mdn",
+        displayName: "MDN Docs",
+        baseDomains: ["developer.mozilla.org", "transcend-cdn.com"],
+        pathRules: ["/"],
+        verifiedUrl: "https://developer.mozilla.org/zh-TW/"
+      },
+      {
+        siteId: "site_demo_iana",
+        displayName: "IANA Reserved Domains",
+        baseDomains: ["www.iana.org", "iana.org"],
+        pathRules: ["/domains/reserved"],
+        verifiedUrl: "https://www.iana.org/domains/reserved"
+      },
+      {
+        siteId: "site_demo_chatgpt_login",
+        displayName: "ChatGPT Login",
+        baseDomains: ["chatgpt.com", "cdn.oaistatic.com", "oaistatic.com"],
+        pathRules: ["/"],
+        verifiedUrl: "https://chatgpt.com/auth/login"
+      }
+    ],
+    shortcuts: [
+      {
+        id: "demo-example",
+        label: "Example.com",
+        url: "https://example.com/"
+      },
+      {
+        id: "demo-mdn",
+        label: "MDN zh-TW",
+        url: "https://developer.mozilla.org/zh-TW/"
+      },
+      {
+        id: "demo-iana",
+        label: "IANA Reserved Domains",
+        url: "https://www.iana.org/domains/reserved"
+      },
+      {
+        id: "demo-chatgpt-login",
+        label: "ChatGPT Login",
+        url: "https://chatgpt.com/auth/login"
+      }
+    ]
   });
   assert.deepEqual(payload.routes, {
     health: "/health",
